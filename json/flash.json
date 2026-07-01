@@ -1,0 +1,20 @@
+{
+  "tool": "auto",
+  "flash_dir": "file_flash_fota/BEXA",
+  "regions": [
+    {
+      "name": "boot",
+      "description": "Bootloader",
+      "address": "0x08000000",
+      "file": "Bootloaderv1.3.3.bin",
+      "reset": false
+    },
+    {
+      "name": "app",
+      "description": "Application / FOTA",
+      "address": "0x08040000",
+      "file": "BX_APPLICATIONv1.4.2.bin",
+      "reset": true
+    }
+  ]
+}

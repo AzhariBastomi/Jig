@@ -1,0 +1,7 @@
+{
+  "connection": "ch340",
+  "fw_dir": "file_flash_fota/App",
+  "fw_version": "v2.13.3.bin",
+  "chunk_size": 512,
+  "fill_with_ff": false
+}

@@ -1,0 +1,16 @@
+{
+  "voltages": [
+    {
+      "name":        "3v3",
+      "label":       "3.3V",
+      "command":     "VOLT_3V3",
+      "description": "Cek tegangan 3.3V"
+    },
+    {
+      "name":        "1v8",
+      "label":       "1.8V",
+      "command":     "VOLT_1V8",
+      "description": "Cek tegangan 1.8V"
+    }
+  ]
+}
