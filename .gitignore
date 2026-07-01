@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Binary / firmware (ukuran besar, tidak perlu di-repo)
+file_flash_fota/
+
+# STLink tools binary
+stlink/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Log
+*.log
