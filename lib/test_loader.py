@@ -40,6 +40,13 @@ import tests
 from test_base import TestBase
 from test_modules import ProgressBarTest, ManualTest, AutoTest
 
+# ---------------------------------------------------------------------------
+# Shared context — diisi oleh app sebelum test dijalankan.
+# Contoh: context["device_id"] = "TM81-0001"
+# Dipakai oleh _make_tm81_item() untuk resolve "@key" dari commissioning.json.
+# ---------------------------------------------------------------------------
+context: dict = {}
+
 _ROOT          = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _FLASH_JSON    = os.path.join(_ROOT, "json", "flash.json")
 _VOLTAGE_JSON  = os.path.join(_ROOT, "json", "voltage.json")
@@ -150,8 +157,12 @@ def _read_tm81_json() -> dict:
         return {}
 
 
-def _make_tm81_item(entry: dict):
-    """Buat AutoTest untuk satu entry di tm81_test.json."""
+def _make_tm81_item(entry: dict, commissioning: dict = None):
+    """Buat AutoTest untuk satu entry di tm81_test.json.
+
+    commissioning — dict dari section 'commissioning' di tm81_test.json.
+    Params priority: commissioning[name] < entry['params'] < context['@key'].
+    """
     import importlib as _imp
     import sys as _sys
 
@@ -161,15 +172,36 @@ def _make_tm81_item(entry: dict):
     cmd_class   = entry.get("command_class", "")
     ttype       = entry.get("type", "auto").lower()
 
+    # Params di-resolve saat runtime:
+    # 1. commissioning[name]  — nilai per-batch dari dalam test JSON itu sendiri
+    # 2. entry["params"]      — override statis (opsional, jarang perlu)
+    # 3. "@key" → context[key] — nilai per-device dari UI
+    _commissioning = commissioning or {}
+    static_params  = entry.get("params", {})
+
+    def _resolve_params() -> dict:
+        # Base: commissioning[name], skip field "_doc"
+        params = {k: v for k, v in _commissioning.get(name, {}).items()
+                  if not k.startswith("_")}
+        # Override dengan static_params dari entry
+        params.update(static_params)
+        # Resolve "@key" → context[key]
+        for k, v in list(params.items()):
+            if isinstance(v, str) and v.startswith("@"):
+                params[k] = context.get(v[1:], "")
+        return params
+
     def _run_fn():
         try:
             # Pastikan root project ada di sys.path agar commands/ bisa diimport
             if _ROOT not in _sys.path:
                 _sys.path.insert(0, _ROOT)
             mod_path, cls_name = cmd_class.rsplit(".", 1)
-            mod  = _imp.import_module(mod_path)
-            cls  = getattr(mod, cls_name)
-            return cls().execute()
+            mod    = _imp.import_module(mod_path)
+            cls    = getattr(mod, cls_name)
+            params = _resolve_params()
+            print(f"\n[TEST] {label}", flush=True)
+            return cls(params=params).execute()
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -186,8 +218,9 @@ def _make_tm81_item(entry: dict):
 
 def load_tm81_tests() -> list:
     """Baca tm81_test.json dan kembalikan list TestItem — satu per entry."""
-    cfg = _read_tm81_json()
-    return [_make_tm81_item(e) for e in cfg.get("tests", [])]
+    cfg          = _read_tm81_json()
+    commissioning = cfg.get("commissioning", {})
+    return [_make_tm81_item(e, commissioning) for e in cfg.get("tests", [])]
 
 
 def tm81_module_names() -> list:
@@ -252,44 +285,4 @@ def discover_tests():
         mod = importlib.import_module(f"tests.{name}")
         cls = _find_test_class(mod)
         target = cls if cls is not None else mod
-        label  = getattr(target, "TITLE", name)
-        results.append((name, label, target))
-    results.sort(key=lambda x: x[1])
-    return results
-
-
-def load_test(module_name: str):
-    """
-    Load satu test module dan kembalikan TestItem.
-
-    Format khusus:
-        "voltage:3v3"  ->  VoltageTest untuk entry "3v3" di voltage.json
-        "flash:boot"   ->  FlashTest untuk region "boot" di flash.json
-    """
-    if module_name.startswith("tm81:"):
-        entry_name = module_name[len("tm81:"):]
-        cfg = _read_tm81_json()
-        for e in cfg.get("tests", []):
-            if e.get("name") == entry_name:
-                return _make_tm81_item(e)
-        raise KeyError(f"TM81 test '{entry_name}' tidak ditemukan di tm81_test.json")
-
-    if module_name.startswith("voltage:"):
-        entry_name = module_name[len("voltage:"):]
-        cfg = _read_voltage_json()
-        for v in cfg.get("voltages", []):
-            if v.get("name") == entry_name:
-                return _make_voltage_item(v)
-        raise KeyError(f"Voltage entry '{entry_name}' tidak ditemukan di voltage.json")
-
-    if module_name.startswith("flash:"):
-        region_name = module_name[len("flash:"):]
-        cfg = _read_flash_json()
-        for r in cfg.get("regions", []):
-            if r.get("name") == region_name:
-                return _make_flash_item(r)
-        raise KeyError(f"Flash region '{region_name}' tidak ditemukan di flash.json")
-
-    mod = importlib.import_module(f"tests.{module_name}")
-    cls = _find_test_class(mod)
-    return _make_item(cls if cls is not None else mod)
+        

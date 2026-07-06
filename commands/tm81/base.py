@@ -81,9 +81,10 @@ class TM81Command:
     TIMEOUT = 2.0
     MAX_RETRY = 3
 
-    def __init__(self, conn: str = None, timeout: float = None):
+    def __init__(self, conn: str = None, timeout: float = None, params=None):
         self._conn    = conn    or self.CONN
         self._timeout = timeout or self.TIMEOUT
+        # params diabaikan di base — subclass yang butuh override __init__ dan baca sendiri
 
     def xfer(self, cmd_id: int, data: bytes = b"", timeout: float = None) -> ParseResult:
         """
@@ -122,6 +123,4 @@ class TM81Command:
 
         return result[0]
 
-    def execute(self) -> str:
-        """Override di subclass. Return "OK" atau "NG:pesan"."""
-        raise NotImplementedError
+    def execute(self) ->

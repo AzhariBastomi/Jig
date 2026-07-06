@@ -17,7 +17,7 @@ class RtcGetTime(TM81Command):
         if len(d) < 6:
             return f"NG:payload terlalu pendek ({len(d)} bytes)"
 
-        sec, mn, hr, day, month, yr = d[0], d[1], d[2], d[3], d[4], d[5]
+        yr, month, day, hr, mn, sec = d[0], d[1], d[2], d[3], d[4], d[5]
         self._time_str = f"20{yr:02d}-{month:02d}-{day:02d} {hr:02d}:{mn:02d}:{sec:02d}"
         print(f"  RTC Time: {self._time_str}")
         return "OK"

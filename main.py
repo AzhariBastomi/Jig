@@ -32,6 +32,7 @@ from config import (
 )
 
 from test_modules import TestItem, TestType, TestResult
+import test_loader
 from test_loader import (discover_tests, load_test,
                          load_flash_tests, flash_module_names,
                          load_voltage_tests, voltage_module_names,
@@ -652,6 +653,10 @@ class App(tk.Tk):
         ).pack(side="left")
 
         self._device_var = tk.StringVar()
+        self._device_var.trace_add(
+            "write",
+            lambda *_: test_loader.context.update({"device_id": self._device_var.get()}),
+        )
         tk.Entry(
             inp_frame, textvariable=self._device_var,
             font=("TkDefaultFont", fs("label")), width=20,
@@ -943,10 +948,4 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
-    try:
-        app = App()
-        app.mainloop()
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        input("Tekan Enter untuk keluar...")
+    t

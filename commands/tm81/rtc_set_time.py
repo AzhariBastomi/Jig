@@ -23,8 +23,8 @@ class RtcSetTime(TM81Command):
     def execute(self) -> str:
         dt = self._dt or datetime.datetime.now()
         data = bytes([
-            dt.second, dt.minute, dt.hour,
-            dt.day, dt.month, dt.year % 100,
+            dt.year % 100, dt.month, dt.day,
+            dt.hour, dt.minute, dt.second,
         ])
         result = self.xfer(CmdId.USR_SET_TIME, data=data)
         if not result.valid and result.error != "ACK":

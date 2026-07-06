@@ -254,7 +254,12 @@ class TM81Parser(BaseParser):
             if self.ACK[0] in raw:
                 self._buf = bytearray(raw[raw.index(self.ACK[0]):])
                 return None
-            self._buf.clear()
+            # Simpan byte terakhir jika bisa jadi awal HEADER_PREFIX
+            # (misal: sudah terima 0x01, tunggu 0x0f berikutnya)
+            if raw and raw[-1] == self.HEADER_PREFIX[0]:
+                self._buf = bytearray(raw[-1:])
+            else:
+                self._buf.clear()
             return None
         if si > 0:
             self._buf = bytearray(raw[si:])
@@ -271,21 +276,10 @@ class TM81Parser(BaseParser):
         if len(frame) < 7:
             return None
 
-        crc_size   = self._crc_bytes
-        frame_body = frame[: -(crc_size + 1)]
-        recv_crc   = int.from_bytes(
-            frame[-(crc_size + 1): -1],
-            "big" if self._crc_bigend else "little"
-        )
-        calc_crc   = self._calc_crc(frame_body)
-
-        if recv_crc != calc_crc:
-            self._buf = bytearray(raw[eot_idx + 1:])
-            return ParseResult(raw=frame, payload=b"", valid=False,
-                               error=f"CRC mismatch recv={recv_crc:#010x} calc={calc_crc:#010x}")
-
-        payload = frame[5: -(crc_size + 2)] if len(frame) >= 11 else b""
-        hex_str = " ".join(f"{b:02x}" for b in frame)
+        # CRC tidak diverifikasi di RX (referensi tm81-command-tester juga tidak cek CRC RX)
+        crc_size = self._crc_bytes
+        payload  = frame[5: -(crc_size + 2)] if len(frame) >= 11 else b""
+        hex_str  = " ".join(f"{b:02x}" for b in frame)
         print(f"[TM81 RX] len={len(frame)}B  {hex_str}", flush=True)
         if payload:
             print(f"[TM81 RX] payload={payload.hex(' ')}", flush=True)
@@ -462,3 +456,4 @@ class SerialComm:
     def _on_frame(self, result):
         for fn in self._cb_data:
             fn(result)
+                                                                                                                                           
