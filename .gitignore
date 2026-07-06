@@ -35,6 +35,10 @@ desktop.ini
 
 # ── Script lokal (tidak perlu di-repo) ───────────────────────────────────────
 git_commit.bat
+card
+
+# ── State lokal (di-generate otomatis saat app jalan) ────────────────────────
+tasks.json
 
 # ── Log & temp ────────────────────────────────────────────────────────────────
 *.log
