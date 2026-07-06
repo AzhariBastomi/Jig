@@ -208,7 +208,8 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
             return f"NG:{e}"
 
     kw = dict(title=label, command=f"TM81_{name.upper()}",
-              description=desc, run_fn=_run_fn)
+              description=desc, run_fn=_run_fn,
+              no_retry=entry.get("no_retry", False))
 
     if ttype == "manual":
         return ManualTest(**kw)
@@ -216,17 +217,23 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
         return AutoTest(**kw)
 
 
+def _tm81_enabled(entry: dict) -> bool:
+    """Entry diaktifkan jika: 'name' ada (bukan '_name') dan 'disabled' != true."""
+    return "name" in entry and not entry.get("disabled", False)
+
+
 def load_tm81_tests() -> list:
     """Baca tm81_test.json dan kembalikan list TestItem — satu per entry."""
-    cfg          = _read_tm81_json()
+    cfg           = _read_tm81_json()
     commissioning = cfg.get("commissioning", {})
-    return [_make_tm81_item(e, commissioning) for e in cfg.get("tests", [])]
+    return [_make_tm81_item(e, commissioning)
+            for e in cfg.get("tests", []) if _tm81_enabled(e)]
 
 
 def tm81_module_names() -> list:
     """Kembalikan ["tm81:ping", "tm81:get_version", ...] sesuai urutan di tm81_test.json."""
     cfg = _read_tm81_json()
-    return [f"tm81:{e['name']}" for e in cfg.get("tests", [])]
+    return [f"tm81:{e['name']}" for e in cfg.get("tests", []) if _tm81_enabled(e)]
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +312,8 @@ def load_test(module_name: str):
         commissioning = cfg.get("commissioning", {})
         for e in cfg.get("tests", []):
             if e.get("name") == entry_name:
+                if not _tm81_enabled(e):
+                    raise KeyError(f"TM81 test '{entry_name}' di-disabled di tm81_test.json")
                 return _make_tm81_item(e, commissioning)
         raise KeyError(f"TM81 test '{entry_name}' tidak ditemukan di tm81_test.json")
 

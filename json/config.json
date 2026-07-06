@@ -34,5 +34,12 @@
       }
     },
     "default": "uart"
+  },
+
+  "workflow": {
+    "_doc": "Pengaturan alur pengujian sequential",
+    "test_delay_ms":  500,
+    "max_retries":    3,
+    "retry_delay_ms": 1000
   }
 }

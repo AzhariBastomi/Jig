@@ -1,4 +1,8 @@
 """commands/tm81/standby_mode.py — Enter Standby Mode (CMD 0x0E)"""
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -9,3 +13,13 @@ class StandbyMode(TM81Command):
             return f"NG:{result.error}"
         print("  Standby Mode → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = StandbyMode().execute()
+    print(result)
+    sm.disconnect_all()

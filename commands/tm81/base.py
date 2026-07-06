@@ -1,15 +1,10 @@
 """
-commands/tm81/base.py — Base class untuk semua command TM81.
-
-Cara pakai:
-    import serial_manager as sm
-    from commands.tm81.base import TM81Command
-
-    sm.connect("ch340")
-    cmd = TM81Command(conn="ch340")
-    result = cmd.xfer(cmd_id=0x00)   # Ping
-    print(result.payload.hex())
+commands/tm81/base.py - Base class untuk semua command TM81.
 """
+
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "lib"))
@@ -18,10 +13,6 @@ import threading
 import serial_manager as sm
 from serial_comm import TM81Parser, ParseResult
 
-
-# ---------------------------------------------------------------------------
-# Command ID constants (mirror dari Lib/Env.py TM81)
-# ---------------------------------------------------------------------------
 
 class CmdId:
     PING                    = 0x00
@@ -65,32 +56,17 @@ class CmdId:
     BL_GOTO_APP             = 102
 
 
-# ---------------------------------------------------------------------------
-# TM81Command — base class
-# ---------------------------------------------------------------------------
-
 class TM81Command:
-    """
-    Base class untuk semua command TM81.
-
-    conn    : nama koneksi di config.json (default: "ch340")
-    timeout : timeout tunggu response (detik)
-    """
+    """Base class untuk semua command TM81."""
 
     CONN    = "ch340"
     TIMEOUT = 2.0
-    MAX_RETRY = 3
 
     def __init__(self, conn: str = None, timeout: float = None, params=None):
         self._conn    = conn    or self.CONN
         self._timeout = timeout or self.TIMEOUT
-        # params diabaikan di base — subclass yang butuh override __init__ dan baca sendiri
 
     def xfer(self, cmd_id: int, data: bytes = b"", timeout: float = None) -> ParseResult:
-        """
-        Kirim command dan tunggu response.
-        Return ParseResult. result.valid=True jika berhasil.
-        """
         comm = sm.get_comm(self._conn)
         if comm is None or not comm.is_connected():
             return ParseResult(raw=b"", payload=b"", valid=False,
@@ -124,5 +100,4 @@ class TM81Command:
         return result[0]
 
     def execute(self) -> str:
-        """Override di subclass. Return "OK" atau "NG:pesan"."""
         raise NotImplementedError

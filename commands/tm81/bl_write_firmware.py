@@ -10,6 +10,10 @@ Flow:
 progress_cb(float 0-100) dipanggil setiap chunk selesai dikirim.
 """
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 import os
 import time
 from crccheck.crc import Crc32Mpeg2
@@ -117,3 +121,16 @@ class BLWriteFirmware(TM81Command):
             return f"NG:BL_GOTO_APP {result.error}"
         print("  BL_GOTO_APP → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    import sys
+    fw_path = sys.argv[1] if len(sys.argv) > 1 else "firmware.bin"
+    params = {"firmware_path": fw_path}
+    result = BLWriteFirmware(params=params).execute()
+    print(result)
+    sm.disconnect_all()

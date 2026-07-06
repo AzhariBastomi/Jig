@@ -1,4 +1,8 @@
 """commands/tm81/lora_set_join_eui.py — Set JoinEUI (CMD 0x10)"""
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -17,3 +21,14 @@ class LoraSetJoinEui(TM81Command):
             return f"NG:{result.error}"
         print(f"  Set JoinEUI={self._join_eui.hex(':')} → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    params = {"join_eui": "0000000000000001"}  # 16 hex chars
+    result = LoraSetJoinEui(params=params).execute()
+    print(result)
+    sm.disconnect_all()

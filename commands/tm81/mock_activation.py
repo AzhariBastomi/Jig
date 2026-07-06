@@ -7,6 +7,10 @@ Langkah:
 
 Max retries: 12 × 10 detik = 120 detik
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 import time
 from commands.tm81.base import TM81Command, CmdId
 from commands.tm81.rtc_set_time import RtcSetTime
@@ -54,3 +58,13 @@ class MockActivation(TM81Command):
                 time.sleep(self.POLL_INTERVAL_SEC)
 
         return "NG:Activation timeout (120s)"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = MockActivation().execute()
+    print(result)
+    sm.disconnect_all()

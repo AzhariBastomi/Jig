@@ -16,6 +16,10 @@ Response payload (20 bytes):
   [19]   Is Last Uplink Success
 """
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -59,3 +63,13 @@ class DevGetInfo(TM81Command):
     def get_info(self) -> dict:
         """Return dict info setelah execute() dipanggil."""
         return getattr(self, "_last_info", {})
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = DevGetInfo().execute()
+    print(result)
+    sm.disconnect_all()

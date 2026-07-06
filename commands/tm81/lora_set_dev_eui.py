@@ -3,6 +3,10 @@
 Default DevEUI dapat di-override lewat params di tm81_test.json:
     "params": {"dev_eui": "0080E1010101010A"}
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -21,3 +25,14 @@ class LoraSetDevEui(TM81Command):
             return f"NG:{result.error}"
         print(f"  Set DevEUI={self._dev_eui.hex(':')} → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    params = {"dev_eui": "0080E1010101010A"}  # 16 hex chars
+    result = LoraSetDevEui(params=params).execute()
+    print(result)
+    sm.disconnect_all()

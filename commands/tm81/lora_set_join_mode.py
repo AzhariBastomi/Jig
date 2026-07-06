@@ -2,6 +2,10 @@
 
 join_mode: 0=None, 1=ABP, 2=OTAA
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -19,3 +23,14 @@ class LoraSetJoinMode(TM81Command):
         names = {0: "None", 1: "ABP", 2: "OTAA"}
         print(f"  Set JoinMode={names.get(self._mode, self._mode)} → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    params = {"join_mode": 0}  # 0=ABP, 1=OTAA
+    result = LoraSetJoinMode(params=params).execute()
+    print(result)
+    sm.disconnect_all()

@@ -6,6 +6,10 @@ Kirim:
 
 Defaults: activated, 0, RES_10L, 0, THIRTY_MINS, UTC+7, CONFIRMED
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -36,3 +40,15 @@ class UserSetConfig(TM81Command):
             return f"NG:{result.error}"
         print(f"  User Set Config → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    # activation=1, initial_counter=0, alarm=0, timezone=7
+    params = {}
+    result = UserSetConfig(params=params).execute()
+    print(result)
+    sm.disconnect_all()

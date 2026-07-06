@@ -3,6 +3,10 @@
 Kirim: day(1B) + month(1B)
 day=0 → baca seluruh bulan (31 hari), day>0 → baca hari tertentu
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 from datetime import datetime
 
@@ -45,3 +49,15 @@ class BackupReadUsage(TM81Command):
             raw = int.from_bytes(d[:4], "little")
             print(f"  Day {self._day}/{self._month}: {raw/divisor:.2f} m3")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    # params: day=1, month=1 (opsional, default bulan ini)
+    params = {}  # kosongkan untuk default
+    result = BackupReadUsage(params=params).execute()
+    print(result)
+    sm.disconnect_all()

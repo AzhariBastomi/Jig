@@ -6,6 +6,10 @@ CLI:
     python voltage_test.py 3v3
 """
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "lib"))
+
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 
@@ -52,4 +56,28 @@ if __name__ == "__main__":
         print(f"Entry {entry_name!r} tidak ditemukan. Tersedia: {names}")
         sys.exit(1)
 
-    print(f"[Voltage {entry.get('label', entry_name)}] -> MANUAL (operator konfirmasi)")
+    label    = entry.get("label", entry_name)
+    expected = entry.get("expected", "")
+    tolerance = entry.get("tolerance", "")
+
+    print(f"\n[Voltage] {label}")
+    if expected:
+        tol_str = f" ± {tolerance}" if tolerance else ""
+        print(f"  Expected : {expected}{tol_str}")
+    print(f"  Ukur tegangan dengan multimeter, lalu konfirmasi.")
+    print()
+
+    while True:
+        ans = input("  Hasil? [o=OK / n=NG / s=Skip]: ").strip().lower()
+        if ans in ("o", "ok", ""):
+            print(f"  [PASS] {label}")
+            break
+        elif ans in ("n", "ng"):
+            reason = input("  Alasan NG (opsional): ").strip()
+            print(f"  [FAIL] {label}" + (f": {reason}" if reason else ""))
+            break
+        elif ans in ("s", "skip"):
+            print(f"  [SKIP] {label}")
+            break
+        else:
+            print("  Ketik o (OK), n (NG), atau s (Skip)")

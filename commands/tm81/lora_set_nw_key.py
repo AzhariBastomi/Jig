@@ -1,4 +1,8 @@
 """commands/tm81/lora_set_nw_key.py — Set NwKey (CMD 0x12)"""
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -17,3 +21,14 @@ class LoraSetNwKey(TM81Command):
             return f"NG:{result.error}"
         print(f"  Set NwKey={self._nw_key.hex(':')} → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    params = {"nw_key": "2B7E151628AED2A6ABF7158809CF4F3C"}  # 32 hex chars
+    result = LoraSetNwKey(params=params).execute()
+    print(result)
+    sm.disconnect_all()

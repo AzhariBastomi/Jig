@@ -2,6 +2,10 @@
 
 Kirim: tx_power(1B) + data_rate(1B) + rx1_delay_sec(1B)
 """
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 from commands.tm81.base import TM81Command, CmdId
 
 
@@ -24,3 +28,15 @@ class LoraSetConfig(TM81Command):
             return f"NG:{result.error}"
         print(f"  Set LoRa Config: TxPwr={self._tx_power} DR={self._data_rate} RX1Delay={self._rx1_delay}s → OK")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    # tx_power=0, data_rate=2, rx1_delay=2
+    params = {}
+    result = LoraSetConfig(params=params).execute()
+    print(result)
+    sm.disconnect_all()

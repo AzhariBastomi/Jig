@@ -1,7 +1,11 @@
 """
-commands/tm81/rtc_get_time.py — Get RTC Time (CMD 0x0A)
-Response payload (6 bytes): second, minute, hour, day, month, year(2digit).
+commands/tm81/rtc_get_time.py - Get RTC Time (CMD 0x0A)
+Response payload (6 bytes): year(2digit), month, day, hour, minute, second.
 """
+
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
 
 from commands.tm81.base import TM81Command, CmdId
 
@@ -20,7 +24,18 @@ class RtcGetTime(TM81Command):
         yr, month, day, hr, mn, sec = d[0], d[1], d[2], d[3], d[4], d[5]
         self._time_str = f"20{yr:02d}-{month:02d}-{day:02d} {hr:02d}:{mn:02d}:{sec:02d}"
         print(f"  RTC Time: {self._time_str}")
-        return "OK"
+        return f"OK:{self._time_str}"
 
     def get_time(self) -> str:
         return getattr(self, "_time_str", "")
+
+
+# -- Standalone test ----------------------------------------------------------
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = RtcGetTime().execute()
+    print(result)
+    sm.disconnect_all()

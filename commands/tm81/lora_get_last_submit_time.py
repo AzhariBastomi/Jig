@@ -3,6 +3,10 @@ commands/tm81/lora_get_last_submit_time.py — Get Last LoRa Submit Time (CMD 0x
 Response payload (4 bytes): unix timestamp (little-endian).
 """
 
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+
 import datetime
 from commands.tm81.base import TM81Command, CmdId
 
@@ -23,3 +27,13 @@ class LoraGetLastSubmitTime(TM81Command):
         self._ts = ts
         print(f"  Last Submit Time: {dt_str} (unix={ts})")
         return "OK"
+
+# ── Standalone test ──────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = LoraGetLastSubmitTime().execute()
+    print(result)
+    sm.disconnect_all()

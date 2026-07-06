@@ -1,8 +1,12 @@
 """
-commands/tm81/sensor_calibration.py — Sensor Calibration (CMD 0x02 + 0x04)
-Loop: get_config → get_data → cek status bit → konfirmasi operator.
+commands/tm81/sensor_calibration.py - Sensor Calibration (CMD 0x02 + 0x04)
+Loop: get_config -> get_data -> cek status bit -> konfirmasi operator.
 Tipe: MANUAL (operator confirm saat calibration done).
 """
+
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
 
 from commands.tm81.base import TM81Command, CmdId
 
@@ -29,37 +33,61 @@ class SensorCalibration(TM81Command):
             return "Sensor voltage too low"
         return ""
 
+    @staticmethod
+    def _resp_cmd(r) -> int:
+        """Ambil CMD_ID dari frame response (byte index 2)."""
+        return r.raw[2] if r.raw and len(r.raw) >= 3 else -1
+
     def execute(self) -> str:
         import time
 
-        max_attempts = 20
+        max_attempts = 10
         for attempt in range(max_attempts):
             time.sleep(2)
 
-            # 1. Get Config (trigger sensor cycle)
-            r = self.xfer(CmdId.SENSOR_GET_CONFIG)
+            # 1. Trigger sensor cycle (SENSOR_GET_CONFIG)
+            r = self.xfer(CmdId.SENSOR_GET_CONFIG, timeout=3.0)
             if not r.valid and r.error != "ACK":
                 print(f"  [cal] sensor_get_config fail: {r.error}")
+                time.sleep(2)
                 continue
-            time.sleep(2)
+            if self._resp_cmd(r) != CmdId.SENSOR_GET_CONFIG:
+                print(f"  [cal] wrong response cmd=0x{self._resp_cmd(r):02x}, skip")
+                time.sleep(2)
+                continue
 
-            # 2. Get Data (baca hasil)
-            r = self.xfer(CmdId.SENSOR_GET_DATA)
+            time.sleep(2)  # tunggu device selesai satu siklus
+
+            # 2. Baca hasil - device butuh ~4-5s, gunakan timeout 6s
+            r = self.xfer(CmdId.SENSOR_GET_DATA, timeout=6.0)
             if not r.valid:
                 print(f"  [cal] sensor_get_data fail: {r.error}")
+                time.sleep(2)
                 continue
 
-            d = r.payload
-            if len(d) < 13:
-                print(f"  [cal] payload terlalu pendek ({len(d)} bytes)")
+            if not r.payload or len(r.payload) < 1:
+                print("  [cal] empty payload, retry")
                 continue
 
-            err = self._check_cal_status(d[12])
+            status_byte = r.payload[0]
+            err = self._check_cal_status(status_byte)
             if err:
-                print(f"  [cal] attempt {attempt+1}: {err}")
+                print(f"  [cal] attempt {attempt+1}/{max_attempts}: {err}")
                 continue
 
-            print(f"  [cal] Calibration success! Intensity={d[0]}, Status=0x{d[12]:02x}")
-            return "OK"
+            # Status OK
+            return "OK:Calibration successful"
 
-        return "NG:Calibration timeout setelah banyak percobaan"
+        return "NG:Calibration failed after max attempts"
+
+
+# -- Standalone test ----------------------------------------------------------
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    # SensorCalibration adalah tipe MANUAL - hasilnya bergantung kondisi sensor
+    result = SensorCalibration().execute()
+    print(result)
+    sm.disconnect_all()

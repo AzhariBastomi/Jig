@@ -1,6 +1,10 @@
 """
-commands/tm81/user_get_config.py — Get User Config (CMD 0x08)
+commands/tm81/user_get_config.py - Get User Config (CMD 0x08)
 """
+
+import sys as _sys, os as _os
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
 
 from commands.tm81.base import TM81Command, CmdId
 
@@ -26,15 +30,39 @@ class UserGetConfig(TM81Command):
         last_counter  = int.from_bytes(d[5:9], "little") / (10 * 10**counter_res)
         tz_val        = int.from_bytes(bytes([d[12]]), signed=True)
 
-        print(f"  Activation   : {self.ACTIVATION.get(d[0], d[0])}")
+        act  = self.ACTIVATION.get(d[0], d[0])
+        res  = self.COUNTER_RES.get(counter_res, counter_res)
+        rate = self.SUBMIT_RATE.get(d[11], d[11])
+        tz   = f"GMT{chr(43) if tz_val>0 else chr(45)}{abs(tz_val)}"
+        msg  = self.MSG_TYPE.get(d[13], d[13])
+
+        print(f"  Activation   : {act}")
         print(f"  Init usage   : {init_counter:.2f} m3")
         print(f"  Last usage   : {last_counter:.2f} m3")
-        print(f"  Counter res  : {self.COUNTER_RES.get(counter_res, counter_res)}")
+        print(f"  Counter res  : {res}")
         print(f"  Alarm byte   : 0x{d[10]:02x}")
-        print(f"  Submit rate  : {self.SUBMIT_RATE.get(d[11], d[11])}")
-        print(f"  Timezone     : GMT{'+' if tz_val>0 else ''}{tz_val}")
-        print(f"  Msg type     : {self.MSG_TYPE.get(d[13], d[13])}")
-        return "OK"
+        print(f"  Submit rate  : {rate}")
+        print(f"  Timezone     : {tz}")
+        print(f"  Msg type     : {msg}")
 
-    def get_raw(self) -> bytes:
-        return getattr(self, "_raw", b"")
+        lines = (
+            f"Activation: {act}\n"
+            f"Init usage: {init_counter:.2f} m3\n"
+            f"Last usage: {last_counter:.2f} m3\n"
+            f"Counter res: {res}\n"
+            f"Submit rate: {rate}\n"
+            f"Timezone: {tz}\n"
+            f"Msg type: {msg}"
+        )
+        return f"OK:{lines}"
+
+
+# -- Standalone test ----------------------------------------------------------
+if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), "..", "..", "lib"))
+    import serial_manager as sm
+    sm.connect("ch340")
+    result = UserGetConfig().execute()
+    print(result)
+    sm.disconnect_all()

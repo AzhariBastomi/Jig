@@ -24,6 +24,7 @@ if hasattr(sys.stdout, "reconfigure"):
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import threading
+import time
 import json
 
 from config import (
@@ -52,7 +53,30 @@ class TestController:
 
     def __init__(self):
         self._serial       = None
-        self._seq_running  = False   # True hanya saat sequential runner aktif
+        self._seq_running  = False
+        self._stop_event   = threading.Event()   # set → interrupt seketika
+        self._wf           = self._load_workflow()
+
+    @staticmethod
+    def _load_workflow() -> dict:
+        try:
+            path = os.path.join(os.path.dirname(__file__), "json", "config.json")
+            with open(path) as f:
+                return json.load(f).get("workflow", {})
+        except Exception:
+            return {}
+
+    @property
+    def _test_delay(self) -> float:
+        return self._wf.get("test_delay_ms", 500) / 1000.0
+
+    @property
+    def _max_retries(self) -> int:
+        return max(0, int(self._wf.get("max_retries", 3)))
+
+    @property
+    def _retry_delay(self) -> float:
+        return self._wf.get("retry_delay_ms", 1000) / 1000.0
 
     # ------------------------------------------------------------------
     # Public
@@ -92,7 +116,10 @@ class TestController:
         if hasattr(fn, '__self__') and hasattr(fn.__self__, 'set_progress_cb'):
             fn.__self__.set_progress_cb(_progress)
 
-        def worker():
+        max_retries = 0 if item.no_retry else self._max_retries
+        retry_delay = self._retry_delay
+
+        def _try_once():
             try:
                 resp = item.run_fn()
             except Exception as e:
@@ -100,33 +127,54 @@ class TestController:
                 traceback.print_exc()
                 resp = f"NG:{e}"
             resp   = str(resp).strip()
-            is_ok  = resp.upper() == "OK"
-            result = TestResult.OK if is_ok else TestResult.NG
-            error  = ""
-            if not is_ok and ":" in resp:
-                error = resp.split(":", 1)[1].strip()
-            row.master.after(0, lambda r=result, e=error: _finish(r, e))
+            is_ok  = resp.upper() == "OK" or resp.upper().startswith("OK:")
+            ok_msg = resp[3:].strip() if resp.upper().startswith("OK:") else ""
+            error  = resp.split(":", 1)[1].strip() if not is_ok and ":" in resp else ""
+            return is_ok, error, ok_msg
 
-        def _finish(result, error=""):
-            row.set_result(result, error)
+        def worker():
+            is_ok, error, ok_msg = _try_once()
+            for attempt in range(1, max_retries + 1):
+                if is_ok or self._stop_event.is_set():
+                    break
+                row.master.after(0, lambda a=attempt, n=max_retries:
+                    row._status_lbl.config(
+                        text=f"Retry {a}/{n}...", fg=COLORS["running"]))
+                # Sleep dengan granularity kecil agar stop bisa interrupt
+                for _ in range(int(retry_delay / 0.05)):
+                    if self._stop_event.is_set():
+                        break
+                    time.sleep(0.05)
+                if self._stop_event.is_set():
+                    break
+                row.master.after(0, row.set_running)
+                is_ok, error, ok_msg = _try_once()
+
+            # Jika di-stop, buang hasil — UI sudah di-reset oleh stop_now()
+            if self._stop_event.is_set():
+                return
+            result = TestResult.OK if is_ok else TestResult.NG
+            row.master.after(0, lambda r=result, e=error, m=ok_msg: _finish(r, e, m))
+
+        def _finish(result, error="", ok_msg=""):
+            row.set_result(result, error, ok_msg)
             if done_callback:
                 done_callback(row)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def run_all(self, rows: list[TestRowWidget], done_callback=None):
+    def run_all(self, rows: list[TestRowWidget], done_callback=None, scroll_fn=None):
         """Run all rows sequentially in a background thread."""
         if self._seq_running:
             return
+        self._stop_event.clear()
         threading.Thread(
-            target=self._seq_worker, args=(rows, done_callback), daemon=True
+            target=self._seq_worker, args=(rows, done_callback, scroll_fn), daemon=True
         ).start()
 
-    def stop_seq(self):
-        """Hentikan sequential runner setelah test yang sedang berjalan selesai."""
-        self._seq_running = False
-
-    def reset_all(self, rows: list[TestRowWidget]):
+    def stop_now(self, rows: list[TestRowWidget]):
+        """Hentikan seketika dan reset semua rows."""
+        self._stop_event.set()
         self._seq_running = False
         for row in rows:
             row.reset()
@@ -208,7 +256,7 @@ class TestController:
     # Sequential runner
     # ------------------------------------------------------------------
 
-    def _seq_worker(self, rows: list[TestRowWidget], done_callback):
+    def _seq_worker(self, rows: list[TestRowWidget], done_callback, scroll_fn=None):
         """
         Jalankan setiap row satu per satu.
         - Berhenti jika result NG.
@@ -227,6 +275,10 @@ class TestController:
             last_row = row
             is_manual = (row.test_item.test_type == TestType.MANUAL)
 
+            # Auto-scroll ke row yang akan dijalankan
+            if scroll_fn:
+                row.master.after(0, lambda r=row: scroll_fn(r))
+
             event = threading.Event()
             row.master.after(
                 0,
@@ -235,14 +287,26 @@ class TestController:
                 )
             )
 
-            # Manual: tunggu operator tanpa batas waktu
-            # Lainnya: max 120 detik (cukup untuk flash STM32)
-            event.wait(timeout=None if is_manual else 120)
+            # Tunggu test selesai — cek stop_event tiap 50ms agar bisa interrupt
+            deadline = None if is_manual else (time.time() + 120)
+            while not event.is_set() and not self._stop_event.is_set():
+                if deadline and time.time() > deadline:
+                    break
+                time.sleep(0.05)
 
-            # Berhenti jika NG atau seq dihentikan
-            if not self._seq_running or row.test_item.result == TestResult.NG:
+            if self._stop_event.is_set():
+                break
+
+            # Berhenti jika NG
+            if row.test_item.result == TestResult.NG:
                 self._seq_running = False
                 break
+
+            # Jeda antar test (juga bisa di-interrupt)
+            for _ in range(int(self._test_delay / 0.05)):
+                if self._stop_event.is_set():
+                    break
+                time.sleep(0.05)
 
         self._seq_running = False
         master = last_row.master if last_row else rows[0].master if rows else None
@@ -276,11 +340,11 @@ class TestListPanel(tk.Frame):
         container.pack(fill="both", expand=True)
 
         self._canvas = tk.Canvas(container, bg=COLORS["bg"], highlightthickness=0)
-        scrollbar    = ttk.Scrollbar(container, orient="vertical", command=self._canvas.yview)
-        self._canvas.configure(yscrollcommand=scrollbar.set)
+        self._scrollbar = ttk.Scrollbar(container, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=self._auto_scrollbar)
 
-        scrollbar.pack(side="right", fill="y")
-        self._canvas.pack(side="left", fill="both", expand=True)
+        # Scrollbar dimulai tersembunyi — muncul otomatis kalau konten melebihi tinggi canvas
+        self._canvas.pack(fill="both", expand=True)
 
         self._inner  = tk.Frame(self._canvas, bg=COLORS["bg"])
         self._window = self._canvas.create_window((0, 0), window=self._inner, anchor="nw")
@@ -288,6 +352,15 @@ class TestListPanel(tk.Frame):
         self._inner.bind("<Configure>", self._on_frame_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
         self._canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _auto_scrollbar(self, first, last):
+        """Tampilkan scrollbar hanya kalau konten tidak muat."""
+        if float(first) <= 0.0 and float(last) >= 1.0:
+            self._scrollbar.pack_forget()
+        else:
+            self._scrollbar.pack(side="right", fill="y")
+            self._canvas.pack(side="left", fill="both", expand=True)
+        self._scrollbar.set(first, last)
 
     def _on_frame_configure(self, event=None):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
@@ -308,33 +381,12 @@ class TestListPanel(tk.Frame):
             w.destroy()
         self._rows.clear()
 
-        # Kolom bersama — header dan semua rows pakai grid yang sama
-        self._inner.columnconfigure(0, minsize=40)    # #
-        self._inner.columnconfigure(1, weight=2)      # title
-        self._inner.columnconfigure(2, weight=1)      # command
-        self._inner.columnconfigure(3, minsize=55)    # badge
-        self._inner.columnconfigure(4, weight=1)      # control
+        # Spacer atas agar cards tidak terlalu rapat ke ujung canvas
+        tk.Frame(self._inner, bg=COLORS["bg"], height=int(6 * self.scale)).pack()
 
-        # ── Header row (baris 0 di _inner) ────────────────────────────
-        fs_h = max(7, int(BASE_FONTS["small"] * self.scale))
-        hdr_kw = dict(bg=COLORS["header_bg"], fg=COLORS["header_fg"],
-                      font=("TkDefaultFont", fs_h, "bold"),
-                      anchor="w", padx=6, pady=5)
-
-        for col, text in [(0, "#"), (1, "Test Name"), (2, "Command"),
-                          (3, "Result"), (4, "Control")]:
-            tk.Label(self._inner, text=text, **hdr_kw).grid(
-                row=0, column=col, sticky="ew")
-
-        # Separator bawah header
-        tk.Frame(self._inner, height=1, bg="#4a6278").grid(
-            row=1, column=0, columnspan=5, sticky="ew")
-
-        # ── Test rows mulai baris 2 ────────────────────────────────────
         for i, item in enumerate(tests):
             row = TestRowWidget(
                 self._inner, item, i,
-                grid_row=2 + i * 2,
                 scale=self.scale,
                 on_run_request=self._on_run_request,
             )
@@ -344,7 +396,24 @@ class TestListPanel(tk.Frame):
         return self._rows
 
     def reset_all(self):
-        self.controller.reset_all(self._rows)
+        for row in self._rows:
+            row.reset()
+
+    def scroll_to_row(self, row: TestRowWidget):
+        """Scroll canvas agar row yang diberikan terlihat di tengah."""
+        self._inner.update_idletasks()
+        try:
+            row_y    = row.frame.winfo_y()
+            row_h    = row.frame.winfo_height()
+            total_h  = self._inner.winfo_height()
+            canvas_h = self._canvas.winfo_height()
+            if total_h <= canvas_h:
+                return
+            target_y = row_y - canvas_h * 0.3
+            fraction = max(0.0, min(1.0, target_y / (total_h - canvas_h)))
+            self._canvas.yview_moveto(fraction)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
 
@@ -372,6 +441,10 @@ class DisplaySettingsDialog(tk.Toplevel):
 
         self._build()
         self._update_custom_state()
+        self.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
+        py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
+        self.geometry(f"+{px}+{py}")
 
     def _build(self):
         tk.Label(self, text="Display Preset", font=("TkDefaultFont", 11, "bold")).grid(
@@ -440,6 +513,10 @@ class AddTestDialog(tk.Toplevel):
         self._on_add  = on_add
         self._modules = discover_tests()
         self._build()
+        self.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
+        py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
+        self.geometry(f"+{px}+{py}")
 
     def _build(self):
         TYPE_COLORS = {"progress": "#3498db", "manual": "#8e44ad", "auto": "#27ae60"}
@@ -589,20 +666,21 @@ class App(tk.Tk):
 
         self._preset       = DEFAULT_PRESET
         self._scale        = FONT_SCALE[DEFAULT_PRESET]
+        self._display_w, self._display_h = DISPLAY_PRESETS[DEFAULT_PRESET]
         self._test_names   : list[str]      = []
         self._tests        : list[TestItem] = []
         self._station      : str            = ""
 
         self._controller   = TestController()
 
-        self._load_tasks()
+        self._load_tasks()   # mungkin update _preset, _scale, _display_w/h
 
         # Auto-connect + scan port saat startup
         self.after(500, self._auto_connect)
 
-        w, h = DISPLAY_PRESETS[DEFAULT_PRESET]
-        self.geometry(f"{w}x{h}")
+        self.geometry(f"{self._display_w}x{self._display_h}")
         self.minsize(320, 240)
+        self.resizable(self._preset == "Custom", self._preset == "Custom")
 
         self._build()
 
@@ -649,7 +727,7 @@ class App(tk.Tk):
 
         tk.Label(
             inp_frame, text="Device ID / Serial No.:",
-            bg=COLORS["bg"], font=("TkDefaultFont", fs("label")),
+            bg=COLORS["bg"], fg=COLORS["text"], font=("TkDefaultFont", fs("label")),
         ).pack(side="left")
 
         self._device_var = tk.StringVar()
@@ -664,7 +742,7 @@ class App(tk.Tk):
 
         tk.Label(
             inp_frame, text="Station:",
-            bg=COLORS["bg"], font=("TkDefaultFont", fs("label")),
+            bg=COLORS["bg"], fg=COLORS["text"], font=("TkDefaultFont", fs("label")),
         ).pack(side="left", padx=(12, 0))
 
         self._station_var = tk.StringVar(value=self._station)
@@ -678,39 +756,19 @@ class App(tk.Tk):
         act_frame = tk.Frame(self, bg=COLORS["bg"], pady=4)
         act_frame.pack(fill="x", padx=10)
 
-        # Container Start/Stop — posisi tetap, hanya isinya yang swap
-        _toggle = tk.Frame(act_frame, bg=COLORS["bg"])
-        _toggle.pack(side="left")
-
-        self._start_btn = tk.Button(
-            _toggle, text="▶  Start",
-            command=self._start_all,
+        # Toggle Start/Stop — satu tombol, berganti state
+        self._toggle_btn = tk.Button(
+            act_frame, text="▶  Start",
+            command=self._toggle_run,
             bg="#2980b9", fg="white", relief="flat",
             font=("TkDefaultFont", fs("button")),
             padx=10, pady=4, cursor="hand2",
         )
-        self._start_btn.pack()
-
-        self._stop_btn = tk.Button(
-            _toggle, text="⏹  Stop",
-            command=self._stop_seq,
-            bg="#e67e22", fg="white", relief="flat",
-            font=("TkDefaultFont", fs("button")),
-            padx=10, pady=4, cursor="hand2",
-        )
-        # Stop tidak di-pack dulu
+        self._toggle_btn.pack(side="left")
 
         # Separator visual
         tk.Frame(act_frame, width=1, bg="#cccccc").pack(side="left", fill="y",
                                                         padx=8, pady=4)
-
-        tk.Button(
-            act_frame, text="↺  Reset",
-            command=self._reset_all,
-            bg="#7f8c8d", fg="white", relief="flat",
-            font=("TkDefaultFont", fs("button")),
-            padx=8, pady=4, cursor="hand2",
-        ).pack(side="left", padx=(0, 4))
 
         tk.Button(
             act_frame, text="🗑  Clear",
@@ -724,8 +782,7 @@ class App(tk.Tk):
         self._status_var = tk.StringVar(value="Ready")
         tk.Label(
             act_frame, textvariable=self._status_var,
-            bg=COLORS["bg"], font=("TkDefaultFont", fs("small")),
-            fg="#555555",
+            bg=COLORS["bg"], fg=COLORS["text"], font=("TkDefaultFont", fs("small")),
         ).pack(side="right")
 
         # ── Test list ────────────────────────────────────────────────
@@ -736,52 +793,42 @@ class App(tk.Tk):
         self._list_panel.pack(fill="both", expand=True, padx=10, pady=(0, 8))
         self._list_panel.load_tests(self._tests)
 
-        # ── Status bar (bottom) ───────────────────────────────────────
-        status_bar = tk.Frame(self, bg="#dde", pady=2)
-        status_bar.pack(fill="x", side="bottom")
-
-        self._conn_label = tk.Label(
-            status_bar,
-            text="⏳ Mencari port...",
-            bg="#dde", fg="#555",
-            font=("TkDefaultFont", fs("small")),
-        )
-        self._conn_label.pack(side="left", padx=8)
-
-        self._port_label = tk.Label(
-            status_bar, text="",
-            bg="#dde", fg="#555",
-            font=("TkDefaultFont", fs("small")),
-        )
-        self._port_label.pack(side="left", padx=(0, 8))
 
     # ------------------------------------------------------------------
     # Sequential run
     # ------------------------------------------------------------------
 
-    def _start_all(self):
+    def _toggle_run(self):
+        if not self._controller.is_seq_running():
+            self._do_start()
+        else:
+            self._do_stop()
+
+    def _do_start(self):
         rows = self._list_panel.get_rows()
         if not rows:
             return
-
-        # Reset semua dulu sebelum mulai
-        self._list_panel.reset_all()
+        # Reset semua hasil sebelum mulai
+        for row in rows:
+            row.reset()
         self._status_var.set("Running…")
+        self._toggle_btn.config(text="⏹  Stop", bg="#e67e22")
+        self._controller.run_all(
+            rows,
+            done_callback=self._on_seq_done,
+            scroll_fn=self._list_panel.scroll_to_row,
+        )
 
-        # Tampilkan Stop, sembunyikan Start
-        self._start_btn.pack_forget()
-        self._stop_btn.pack(side="left")
-
-        self._controller.run_all(rows, done_callback=self._on_seq_done)
-
-    def _stop_seq(self):
-        self._controller.stop_seq()
+    def _do_stop(self):
+        """Hentikan seketika dan reset semua — tidak perlu tunggu test selesai."""
+        rows = self._list_panel.get_rows()
+        self._controller.stop_now(rows)
+        self._toggle_btn.config(text="▶  Start", bg="#2980b9")
         self._status_var.set("Dihentikan")
 
     def _on_seq_done(self, _):
-        """Dipanggil dari main thread saat sequential runner selesai."""
-        # Cek apakah ada yang NG
-        rows = self._list_panel.get_rows()
+        """Dipanggil dari main thread saat sequential runner selesai normal."""
+        rows    = self._list_panel.get_rows()
         ng_rows = [r for r in rows if r.test_item.result == TestResult.NG]
         ok_rows = [r for r in rows if r.test_item.result == TestResult.OK]
 
@@ -793,9 +840,7 @@ class App(tk.Tk):
         else:
             self._status_var.set("Selesai")
 
-        # Kembalikan tombol ke kondisi awal
-        self._stop_btn.pack_forget()
-        self._start_btn.pack(side="left")
+        self._toggle_btn.config(text="▶  Start", bg="#2980b9")
 
     # ------------------------------------------------------------------
     # Actions
@@ -840,51 +885,29 @@ class App(tk.Tk):
                 status = f"OK [{found}]" if ok else f"NG (cari: {dev_name!r})"
                 print(f"[serial] {name}: {status}")
 
-            self.after(0, lambda r=results: self._update_conn_label(r))
-
         threading.Thread(target=_do, daemon=True).start()
-
-    def _update_conn_label(self, results: dict):
-        """Tampilkan status semua koneksi di status bar."""
-        if not hasattr(self, "_conn_label"):
-            return
-        parts = []
-        any_ok = False
-        for name, info in results.items():
-            if info["ok"]:
-                port_str = f" [{info['port']}]" if info["port"] else ""
-                parts.append(f"● {name}{port_str}")
-                any_ok = False
-        for name, info in results.items():
-            if info["ok"]:
-                port_str = f" [{info['port']}]" if info["port"] else ""
-                parts.append(f"\u25cf {name}{port_str}")
-                any_ok = True
-            else:
-                parts.append(f"\u2717 {name}")
-        text = "  |  ".join(parts) if parts else "\u2717 Tidak ada port"
-        fg   = "#27ae60" if any_ok else "red"
-        self._conn_label.config(text=text, fg=fg)
 
     def _on_station_change(self, *_):
         self._station = self._station_var.get()
         self._save_tasks()
 
     def _reset_all(self):
-        self._controller.stop_seq()
-        self._list_panel.reset_all()
+        rows = self._list_panel.get_rows()
+        self._controller.stop_now(rows)
+        self._toggle_btn.config(text="▶  Start", bg="#2980b9")
         self._status_var.set("Ready")
-        if hasattr(self, "_stop_btn"):
-            self._stop_btn.pack_forget()
-            self._start_btn.pack(side="left")
 
     def _open_display_settings(self):
         DisplaySettingsDialog(self, self._preset, on_apply=self._apply_display)
 
     def _apply_display(self, preset: str, width: int, height: int):
-        self._preset = preset
-        self._scale  = FONT_SCALE.get(preset, 1.0)
+        self._preset    = preset
+        self._scale     = FONT_SCALE.get(preset, 1.0)
+        self._display_w = width
+        self._display_h = height
         self.geometry(f"{width}x{height}")
+        self.resizable(preset == "Custom", preset == "Custom")
+        self._save_tasks()   # simpan preset agar diingat saat restart
         for child in self.winfo_children():
             child.destroy()
         self._build()
@@ -915,9 +938,12 @@ class App(tk.Tk):
     def _save_tasks(self):
         try:
             data = {
-                "station": getattr(self, "_station", ""),
-                "mode":    getattr(self, "_mode", "default"),
-                "tests":   self._test_names,
+                "station":   getattr(self, "_station", ""),
+                "mode":      getattr(self, "_mode", "default"),
+                "tests":     self._test_names,
+                "preset":    getattr(self, "_preset", ""),
+                "display_w": getattr(self, "_display_w", 0),
+                "display_h": getattr(self, "_display_h", 0),
             }
             with open(self._TASKS_FILE, "w") as f:
                 json.dump(data, f, indent=2)
@@ -936,6 +962,12 @@ class App(tk.Tk):
                 names = data.get("tests", [])
                 self._station = data.get("station", "")
                 self._mode    = data.get("mode", "default")
+                saved_preset = data.get("preset", "")
+                if saved_preset and (saved_preset in DISPLAY_PRESETS or saved_preset == "Custom"):
+                    self._preset    = saved_preset
+                    self._scale     = FONT_SCALE.get(saved_preset, 1.0)
+                    self._display_w = data.get("display_w", self._display_w)
+                    self._display_h = data.get("display_h", self._display_h)
             for name in names:
                 try:
                     item = load_test(name)
