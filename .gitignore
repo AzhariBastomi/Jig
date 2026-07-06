@@ -1,27 +1,45 @@
-# Virtual environment
+# ── Virtual environment ──────────────────────────────────────────────────────
 .venv/
 venv/
 env/
 
-# Python cache
+# ── Python cache (tidak perlu di-repo, di-generate otomatis) ─────────────────
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
 
-# Binary / firmware (ukuran besar, tidak perlu di-repo)
+# ── Binary / firmware (ukuran besar) ─────────────────────────────────────────
 file_flash_fota/
+*.bin
+*.hex
+*.elf
 
-# STLink tools binary
+# ── STLink tools binary ───────────────────────────────────────────────────────
 stlink/
 
-# OS
+# ── Commissioning (konfigurasi per-batch, sensitif) ──────────────────────────
+json/commissioning.json
+
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.iml
+*.suo
+*.user
 
-# Log
+# ── Log & temp ────────────────────────────────────────────────────────────────
 *.log
+*.tmp
+*.bak
+*.swp
+
+# ── Build / dist ──────────────────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/

@@ -948,4 +948,10 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
-    t
+    try:
+        app = App()
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        input("Tekan Enter untuk keluar...")

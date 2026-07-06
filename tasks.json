@@ -5,6 +5,7 @@
     "tm81:ping",
     "tm81:get_version",
     "tm81:get_id",
+    "tm81:set_id",
     "tm81:rtc_set",
     "tm81:rtc_get",
     "tm81:user_get_config",
@@ -33,9 +34,6 @@
     "tm81:standby_mode",
     "tm81:app_goto_bl",
     "tm81:bl_goto_app",
-    "tm81:wdt_test",
-    "tm81_flash_test",
-    "flash:boot",
-    "flash:app"
+    "tm81:wdt_test"
   ]
 }

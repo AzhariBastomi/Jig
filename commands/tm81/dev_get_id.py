@@ -20,3 +20,13 @@ class DevGetId(TM81Command):
             return f"NG:payload terlalu pendek ({len(d)} bytes, expected 24)"
 
         self._dev_eui = d[0:8].hex(":")
+        self._serial  = d[8:24].decode("utf-8", errors="replace").strip("\x00").strip()
+        print(f"  Device EUI : {self._dev_eui}")
+        print(f"  Serial No  : {self._serial}")
+        return "OK"
+
+    def get_eui(self) -> str:
+        return getattr(self, "_dev_eui", "")
+
+    def get_serial(self) -> str:
+        return getattr(self, "_serial", "")

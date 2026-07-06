@@ -17,4 +17,10 @@ class DevSetId(TM81Command):
     def execute(self) -> str:
         if not self._device_id:
             return "NG:device_id kosong — isi field 'Device ID / Serial No.' di UI"
-        # Kirim 16 bytes (SN o
+        # Kirim 16 bytes (SN only, bukan 24)
+        id_bytes = self._device_id.encode("utf-8")[:16].ljust(16, b"\x00")
+        result   = self.xfer(CmdId.DEV_SET_ID, data=id_bytes)
+        if not result.valid and result.error != "ACK":
+            return f"NG:{result.error}"
+        print(f"  Set Serial No: {self._device_id} → OK")
+        return "OK"

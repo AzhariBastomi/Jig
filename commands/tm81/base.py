@@ -123,4 +123,6 @@ class TM81Command:
 
         return result[0]
 
-    def execute(self) ->
+    def execute(self) -> str:
+        """Override di subclass. Return "OK" atau "NG:pesan"."""
+        raise NotImplementedError

@@ -285,4 +285,45 @@ def discover_tests():
         mod = importlib.import_module(f"tests.{name}")
         cls = _find_test_class(mod)
         target = cls if cls is not None else mod
-        
+        label  = getattr(target, "TITLE", name)
+        results.append((name, label, target))
+    results.sort(key=lambda x: x[1])
+    return results
+
+
+def load_test(module_name: str):
+    """
+    Load satu test module dan kembalikan TestItem.
+
+    Format khusus:
+        "voltage:3v3"  ->  VoltageTest untuk entry "3v3" di voltage.json
+        "flash:boot"   ->  FlashTest untuk region "boot" di flash.json
+    """
+    if module_name.startswith("tm81:"):
+        entry_name    = module_name[len("tm81:"):]
+        cfg           = _read_tm81_json()
+        commissioning = cfg.get("commissioning", {})
+        for e in cfg.get("tests", []):
+            if e.get("name") == entry_name:
+                return _make_tm81_item(e, commissioning)
+        raise KeyError(f"TM81 test '{entry_name}' tidak ditemukan di tm81_test.json")
+
+    if module_name.startswith("voltage:"):
+        entry_name = module_name[len("voltage:"):]
+        cfg = _read_voltage_json()
+        for v in cfg.get("voltages", []):
+            if v.get("name") == entry_name:
+                return _make_voltage_item(v)
+        raise KeyError(f"Voltage entry '{entry_name}' tidak ditemukan di voltage.json")
+
+    if module_name.startswith("flash:"):
+        region_name = module_name[len("flash:"):]
+        cfg = _read_flash_json()
+        for r in cfg.get("regions", []):
+            if r.get("name") == region_name:
+                return _make_flash_item(r)
+        raise KeyError(f"Flash region '{region_name}' tidak ditemukan di flash.json")
+
+    mod = importlib.import_module(f"tests.{module_name}")
+    cls = _find_test_class(mod)
+    return _make_item(cls if cls is not None else mod)
