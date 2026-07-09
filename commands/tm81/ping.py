@@ -3,11 +3,13 @@ commands/tm81/ping.py — Ping MCU (CMD 0x00)
 Response: ACK jika device aktif.
 """
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
-
-from commands.tm81.base import TM81Command, CmdId
+try:
+    from commands.tm81.base import TM81Command, CmdId
+except ImportError:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+    from commands.tm81.base import TM81Command, CmdId
 
 
 class Ping(TM81Command):

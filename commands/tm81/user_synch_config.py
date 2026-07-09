@@ -2,11 +2,13 @@
 commands/tm81/user_synch_config.py — Sync User Config (CMD 0x06)
 """
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
-
-from commands.tm81.base import TM81Command, CmdId
+try:
+    from commands.tm81.base import TM81Command, CmdId
+except ImportError:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+    from commands.tm81.base import TM81Command, CmdId
 
 
 class UserSynchConfig(TM81Command):

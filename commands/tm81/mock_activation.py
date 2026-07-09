@@ -7,12 +7,15 @@ Langkah:
 
 Max retries: 12 × 10 detik = 120 detik
 """
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+try:
+    from commands.tm81.base import TM81Command, CmdId
+except ImportError:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+    from commands.tm81.base import TM81Command, CmdId
 
 import time
-from commands.tm81.base import TM81Command, CmdId
 from commands.tm81.rtc_set_time import RtcSetTime
 from commands.tm81.user_set_config import UserSetConfig
 from commands.tm81.dev_get_info import DevGetInfo

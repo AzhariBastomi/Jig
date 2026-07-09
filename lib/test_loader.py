@@ -191,17 +191,26 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
                 params[k] = context.get(v[1:], "")
         return params
 
-    def _run_fn():
+    # Resolve class sekarang (load time), bukan saat test run
+    _cmd_cls   = None
+    _load_err  = ""
+    if cmd_class:
         try:
-            # Pastikan root project ada di sys.path agar commands/ bisa diimport
             if _ROOT not in _sys.path:
                 _sys.path.insert(0, _ROOT)
-            mod_path, cls_name = cmd_class.rsplit(".", 1)
-            mod    = _imp.import_module(mod_path)
-            cls    = getattr(mod, cls_name)
+            _mod_path, _cls_name = cmd_class.rsplit(".", 1)
+            _mod      = _imp.import_module(_mod_path)
+            _cmd_cls  = getattr(_mod, _cls_name)
+        except Exception as _e:
+            _load_err = str(_e)
+
+    def _run_fn():
+        if _cmd_cls is None:
+            return f"NG:{_load_err or 'command_class tidak diset'}"
+        try:
             params = _resolve_params()
             print(f"\n[TEST] {label}", flush=True)
-            return cls(params=params).execute()
+            return _cmd_cls(params=params).execute()
         except Exception as e:
             import traceback
             traceback.print_exc()

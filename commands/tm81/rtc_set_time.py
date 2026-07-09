@@ -3,12 +3,15 @@ commands/tm81/rtc_set_time.py — Set RTC Time (CMD 0x0B)
 Data (6 bytes): second, minute, hour, day, month, year(2digit).
 """
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+try:
+    from commands.tm81.base import TM81Command, CmdId
+except ImportError:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+    from commands.tm81.base import TM81Command, CmdId
 
 import datetime
-from commands.tm81.base import TM81Command, CmdId
 
 
 class RtcSetTime(TM81Command):

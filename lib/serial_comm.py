@@ -333,6 +333,8 @@ class SerialComm:
         self._cb_data:       list[Callable] = []
         self._cb_connect:    list[Callable] = []
         self._cb_disconnect: list[Callable] = []
+        self._lock           = threading.Lock()
+        self._disconnected   = False
 
         self._parser.set_frame_callback(self._on_frame)
 
@@ -387,14 +389,19 @@ class SerialComm:
 
     def disconnect(self):
         """Tutup koneksi serial dan hentikan reader thread."""
+        already = self._disconnected
+        self._disconnected = True
         self._stop_evt.set()
         if self._port and self._port.is_open:
             self._port.close()
         if self._thread:
             self._thread.join(timeout=2.0)
         self._port = None
-        for fn in self._cb_disconnect:
-            fn()
+        if not already:
+            with self._lock:
+                cbs = list(self._cb_disconnect)
+            for fn in cbs:
+                fn()
 
     def is_connected(self):
         return self._port is not None and self._port.is_open
@@ -427,32 +434,47 @@ class SerialComm:
     # ------------------------------------------------------------------
 
     def on_data(self, fn):
-        self._cb_data.append(fn)
+        with self._lock:
+            self._cb_data.append(fn)
+
+    def off_data(self, fn):
+        with self._lock:
+            try: self._cb_data.remove(fn)
+            except ValueError: pass
 
     def on_connect(self, fn):
-        self._cb_connect.append(fn)
+        with self._lock:
+            self._cb_connect.append(fn)
 
     def on_disconnect(self, fn):
-        self._cb_disconnect.append(fn)
+        with self._lock:
+            self._cb_disconnect.append(fn)
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _reader(self):
-        """Thread: baca satu byte sekaligus, feed ke parser."""
+        """Thread: baca dalam chunk, feed ke parser byte per byte."""
         while not self._stop_evt.is_set():
             try:
                 if self._port and self._port.is_open:
-                    b = self._port.read(1)
-                    if b:
-                        self._parser.feed(b)
+                    n = max(1, self._port.in_waiting)
+                    data = self._port.read(n)
+                    for b in data:
+                        self._parser.feed(bytes([b]))
             except serial.SerialException as e:
                 log.warning("Reader error: %s", e)
                 break
-        for fn in self._cb_disconnect:
-            fn()
+        if not self._disconnected:
+            self._disconnected = True
+            with self._lock:
+                cbs = list(self._cb_disconnect)
+            for fn in cbs:
+                fn()
 
     def _on_frame(self, result):
-        for fn in self._cb_data:
+        with self._lock:
+            cbs = list(self._cb_data)
+        for fn in cbs:
             fn(result)

@@ -3,11 +3,13 @@ commands/tm81/rtc_get_time.py - Get RTC Time (CMD 0x0A)
 Response payload (6 bytes): year(2digit), month, day, hour, minute, second.
 """
 
-import sys as _sys, os as _os
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
-_sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
-
-from commands.tm81.base import TM81Command, CmdId
+try:
+    from commands.tm81.base import TM81Command, CmdId
+except ImportError:
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", ".."))
+    _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
+    from commands.tm81.base import TM81Command, CmdId
 
 
 class RtcGetTime(TM81Command):

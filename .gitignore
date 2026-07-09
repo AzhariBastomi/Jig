@@ -40,13 +40,15 @@ card
 # ── State lokal (di-generate otomatis saat app jalan) ────────────────────────
 tasks.json
 
+# ── Database lokal (di-generate oleh server/app.py) ─────────────────────────
+server/jig.db
+server/jig.db-shm
+server/jig.db-wal
+
 # ── Log & temp ────────────────────────────────────────────────────────────────
 *.log
 *.tmp
 *.bak
 *.swp
 
-# ── Build / dist ──────────────────────────────────────────────────────────────
-build/
-dist/
-*.egg-info/
+# ── Build / dist ─────────────────────�

@@ -20,7 +20,7 @@
   },
 
   "tests": [
-    { "name": "ping",               "label": "Ping MCU",               "command_class": "commands.tm81.ping.Ping",                                      "description": "Cek komunikasi IrDA ke device TM81" },
+    { "name": "ping",               "label": "Ping MCU",               "command_class": "commands.tm81.ping.Ping",                                      "description": "Dihandle otomatis oleh KeepaliveManager (bukan test task)", "disabled": true },
     { "name": "get_version",        "label": "Get Firmware Version",   "command_class": "commands.tm81.user_get_version.UserGetVersion",                 "description": "Baca versi App dan Bootloader" },
     { "name": "get_id",             "label": "Get Device ID",          "command_class": "commands.tm81.dev_get_id.DevGetId",                             "description": "Baca Device ID dari memori" },
     { "name": "set_id",             "label": "Set Device ID",          "command_class": "commands.tm81.dev_set_id.DevSetId",                             "description": "Tulis Device ID dari field UI",                      "disabled": true },

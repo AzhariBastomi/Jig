@@ -230,10 +230,7 @@ def send_and_wait(command: str, conn: str = None, timeout: float = 5.0) -> str:
     c.send(command)
     done.wait(timeout=timeout)
 
-    try:
-        c._cb_data.remove(on_frame)
-    except ValueError:
-        pass
+    c.off_data(on_frame)
 
     return result[0] or ""
 

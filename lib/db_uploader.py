@@ -23,6 +23,7 @@ Contoh:
     up.upload(rec)
 """
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -297,3 +298,163 @@ class MultiUploader(UploaderBase):
     def upload(self, record: TestResultRecord) -> bool:
         results = [u.upload(record) for u in self._uploaders]
         return all(results)
+
+
+# ---------------------------------------------------------------------------
+# SQLite (local — tidak perlu server eksternal)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SQLiteConfig:
+    db_path: str = ""          # default: auto-detect server/jig.db
+    table:   str = "test_results"
+
+
+class SQLiteUploader(UploaderBase):
+    """
+    Upload hasil test ke SQLite lokal via server/db.py.
+    Tidak butuh server eksternal — cocok untuk dev/standalone.
+
+    Database dibuat otomatis jika belum ada.
+    Session ID dikelola di luar (set via set_session_id()).
+    Jika session_id=None, satu session baru dibuat per batch.
+    """
+
+    def __init__(self, config: "SQLiteConfig | None" = None):
+        if config is None:
+            config = SQLiteConfig()
+        self.cfg = config
+        self._session_id: "int | None" = None
+
+        # Tentukan path DB
+        if not self.cfg.db_path:
+            _root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+            self.cfg.db_path = os.path.join(_root, "server", "jig.db")
+
+    def set_session_id(self, session_id: int):
+        self._session_id = session_id
+
+    def _ensure_session(self, conn, record: "TestResultRecord") -> int:
+        """Buat session baru jika belum ada, atau kembalikan yang ada."""
+        if self._session_id:
+            return self._session_id
+        cur = conn.execute(
+            "INSERT INTO sessions (created_at, station, device_id) VALUES (?, ?, ?)",
+            (record.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
+             record.station, record.device_id),
+        )
+        self._session_id = cur.lastrowid
+        conn.commit()
+        return self._session_id
+
+    def upload(self, record: "TestResultRecord") -> bool:
+        def _do(r):
+            import sqlite3 as _sql3
+            _root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+            # Ensure schema via server/db.py
+            try:
+                import sys as _sys
+                _sys.path.insert(0, _root)
+                from server.db import init_db, get_connection
+                init_db(self.cfg.db_path)
+                conn = get_connection(self.cfg.db_path)
+            except ImportError:
+                # Fallback: pakai sqlite3 langsung tanpa schema helper
+                conn = _sql3.connect(self.cfg.db_path, check_same_thread=False)
+                conn.row_factory = _sql3.Row
+                conn.execute("PRAGMA foreign_keys=ON")
+
+            with conn:
+                session_id = self._ensure_session(conn, r)
+                conn.execute(
+                    "INSERT INTO test_results "
+                    "(session_id, timestamp, test_name, command, result, duration_ms, notes) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (session_id,
+                     r.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                     r.test_name, r.command, r.result, r.duration_ms, r.notes),
+                )
+        return self._safe(_do, record)
+
+
+# ---------------------------------------------------------------------------
+# LocalServerUploader — kirim via REST API ke server/app.py (Flask)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LocalServerConfig:
+    base_url: str = "http://localhost:5001"
+    timeout:  int = 5    # seconds
+
+
+class LocalServerUploader(UploaderBase):
+    """
+    Upload hasil test ke Jig Flask server (server/app.py) via HTTP REST.
+    Session ID dibuat otomatis saat pertama kali upload dipanggil.
+    Set ulang dengan set_session_id() / new_session().
+    """
+
+    def __init__(self, config: "LocalServerConfig | None" = None,
+                 station: str = "", device_id: str = "", project: "str | None" = None):
+        self.cfg        = config or LocalServerConfig()
+        self._station   = station
+        self._device_id = device_id
+        self._project   = project
+        self._session_id: "int | None" = None
+
+    def set_session_id(self, session_id: int):
+        self._session_id = session_id
+
+    def new_session(self, station: str = "", device_id: str = "",
+                    project: "str | None" = None) -> "int | None":
+        """Buat sesi baru dan simpan id-nya. Return session_id atau None jika gagal."""
+        try:
+            import urllib.request, json as _json
+            payload = _json.dumps({
+                "station":   station or self._station,
+                "device_id": device_id or self._device_id,
+                "project":   project or self._project,
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.cfg.base_url}/api/v1/sessions",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.cfg.timeout) as resp:
+                data = _json.loads(resp.read())
+                self._session_id = data["id"]
+                return self._session_id
+        except Exception as e:
+            print(f"[LocalServerUploader] new_session error: {e}")
+            return None
+
+    def _ensure_session(self, record: "TestResultRecord") -> "int | None":
+        if self._session_id:
+            return self._session_id
+        return self.new_session(station=record.station, device_id=record.device_id)
+
+    def upload(self, record: "TestResultRecord") -> bool:
+        def _do(r):
+            import urllib.request, json as _json
+            session_id = self._ensure_session(r)
+            if not session_id:
+                raise RuntimeError("Tidak bisa membuat session")
+            payload = _json.dumps({
+                "test_name":   r.test_name,
+                "command":     r.command,
+                "result":      r.result,
+                "duration_ms": r.duration_ms,
+                "notes":       r.notes,
+                "timestamp":   r.timestamp.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            }).encode()
+            req = urllib.request.Request(
+                f"{self.cfg.base_url}/api/v1/sessions/{session_id}/results",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=self.cfg.timeout) as resp:
+                if resp.status not in (200, 201):
+                    raise RuntimeError(f"HTTP {resp.status}")
+        return self._safe(_do, record)

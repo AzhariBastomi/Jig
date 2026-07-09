@@ -91,8 +91,7 @@ class TM81Command:
             return ParseResult(raw=b"", payload=b"", valid=False, error=str(e))
 
         event.wait(timeout=timeout)
-        try: comm._cb_data.remove(_on_data)
-        except ValueError: pass
+        comm.off_data(_on_data)
 
         if result[0] is None:
             return ParseResult(raw=b"", payload=b"", valid=False, error="Timeout")

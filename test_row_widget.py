@@ -114,8 +114,10 @@ class TestRowWidget:
             r2, text="",
             bg=bg, fg=COLORS["sub"],
             font=("TkDefaultFont", self._fs("small")),
-            anchor="w", wraplength=int(220 * s))
+            anchor="w")
         self._status_lbl.pack(side="left", fill="x", expand=True)
+        self._status_lbl.bind("<Configure>",
+            lambda e: self._status_lbl.config(wraplength=e.width) if e.width > 20 else None)
 
         # Control buttons — right of status label
         self._ctrl = tk.Frame(r2, bg=bg)

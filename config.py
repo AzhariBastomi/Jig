@@ -26,7 +26,6 @@ BASE_FONTS = {
     "small":   9,
 }
 
-ROW_HEIGHT = 60
 SERIAL_MOCK_DELAY = 1.5
 
 
