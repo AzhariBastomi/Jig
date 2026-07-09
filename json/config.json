@@ -49,13 +49,8 @@
   },
 
   "database": {
-    "_doc": "Pengaturan upload hasil test ke database",
+    "_doc": "Pengaturan upload hasil test ke server (Flask REST API)",
     "enabled": true,
-    "backend": "server",
-    "_backend_options": [
-      "sqlite",
-      "server"
-    ],
     "server_url": "http://localhost:5001"
   }
 }

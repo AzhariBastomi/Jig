@@ -33,19 +33,35 @@ TM81 tasks (format khusus):
 import importlib
 import inspect
 import json
+import logging
 import os
 import pkgutil
+import threading
 import tests
+
+_log = logging.getLogger("test_loader")
 
 from test_base import TestBase
 from test_modules import ProgressBarTest, ManualTest, AutoTest
 
 # ---------------------------------------------------------------------------
 # Shared context — diisi oleh app sebelum test dijalankan.
-# Contoh: context["device_id"] = "TM81-0001"
-# Dipakai oleh _make_tm81_item() untuk resolve "@key" dari commissioning.json.
+# Thread-safe: gunakan get_context() / update_context() untuk akses dari thread.
 # ---------------------------------------------------------------------------
 context: dict = {}
+_context_lock = threading.Lock()
+
+
+def get_context(key: str, default: str = "") -> str:
+    """Thread-safe getter untuk context."""
+    with _context_lock:
+        return context.get(key, default)
+
+
+def update_context(data: dict) -> None:
+    """Thread-safe update untuk context."""
+    with _context_lock:
+        context.update(data)
 
 _ROOT          = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _FLASH_JSON    = os.path.join(_ROOT, "json", "flash.json")
@@ -188,7 +204,7 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
         # Resolve "@key" → context[key]
         for k, v in list(params.items()):
             if isinstance(v, str) and v.startswith("@"):
-                params[k] = context.get(v[1:], "")
+                params[k] = get_context(v[1:])
         return params
 
     # Resolve class sekarang (load time), bukan saat test run
@@ -209,11 +225,10 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
             return f"NG:{_load_err or 'command_class tidak diset'}"
         try:
             params = _resolve_params()
-            print(f"\n[TEST] {label}", flush=True)
+            _log.info("[TEST] %s", label)
             return _cmd_cls(params=params).execute()
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            _log.exception("[TEST] %s exception:", label)
             return f"NG:{e}"
 
     kw = dict(title=label, command=f"TM81_{name.upper()}",
@@ -342,6 +357,7 @@ def load_test(module_name: str):
                 return _make_flash_item(r)
         raise KeyError(f"Flash region '{region_name}' tidak ditemukan di flash.json")
 
+    # Modul biasa dari folder tests/
     mod = importlib.import_module(f"tests.{module_name}")
     cls = _find_test_class(mod)
     return _make_item(cls if cls is not None else mod)
