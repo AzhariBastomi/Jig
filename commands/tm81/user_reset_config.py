@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/user_reset_config.py — Reset User Config to Default (CMD 0x09)
 """
 
@@ -17,7 +19,7 @@ class UserResetConfig(TM81Command):
         result = self.xfer(CmdId.USR_RESET_CONFIG)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  User Reset Config → OK")
+        _log.debug("  User Reset Config → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

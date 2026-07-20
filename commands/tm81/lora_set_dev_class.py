@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_dev_class.py — Set LoRa Device Class (CMD 0x15)
+import logging
+_log = logging.getLogger(__name__)
 
 dev_class: 0=A, 1=B, 2=C
 """
@@ -23,7 +25,7 @@ class LoraSetDevClass(TM81Command):
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         names = {0: "A", 1: "B", 2: "C"}
-        print(f"  Set DevClass={names.get(self._cls, self._cls)} → OK")
+        _log.debug(f"  Set DevClass={names.get(self._cls, self._cls)} → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

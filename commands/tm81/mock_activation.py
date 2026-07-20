@@ -19,6 +19,8 @@ import time
 from commands.tm81.rtc_set_time import RtcSetTime
 from commands.tm81.user_set_config import UserSetConfig
 from commands.tm81.dev_get_info import DevGetInfo
+import logging
+_log = logging.getLogger(__name__)
 
 
 class MockActivation(TM81Command):
@@ -51,10 +53,10 @@ class MockActivation(TM81Command):
 
             join_st   = d[self.IDX_JOIN_STATUS]
             uplink_st = d[self.IDX_UPLINK_STATUS]
-            print(f"  [{attempt}/{self.MAX_RETRIES}] Join={join_st} Uplink={uplink_st}")
+            _log.debug(f"  [{attempt}/{self.MAX_RETRIES}] Join={join_st} Uplink={uplink_st}")
 
             if join_st == 1 and uplink_st == 1:
-                print("  Activation sukses!")
+                _log.debug("  Activation sukses!")
                 return "OK"
 
             if attempt < self.MAX_RETRIES:

@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/sensor_get_data.py - Get Sensor Data (CMD 0x04)
 """
 
@@ -24,9 +26,9 @@ class SensorGetData(TM81Command):
 
         raw_val = int.from_bytes(d[0:2], "little")
         self._raw = raw_val
-        print(f"  Sensor Raw Value: {raw_val} (0x{raw_val:04x})")
+        _log.debug(f"  Sensor Raw Value: {raw_val} (0x{raw_val:04x})")
         if len(d) >= 4:
-            print(f"  Sensor Extra: {d[2:].hex()}")
+            _log.debug(f"  Sensor Extra: {d[2:].hex()}")
         return f"OK:Raw={raw_val} (0x{raw_val:04x})"
 
     def get_raw(self) -> int:

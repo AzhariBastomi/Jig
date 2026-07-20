@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/lora_get_config.py — Get LoRaWAN Config (CMD 0x16)
 Response payload (57 bytes): full LoRaWAN configuration.
 """
@@ -42,7 +44,7 @@ class LoraGetConfig(TM81Command):
 
         self._config = config
         for k, v in config.items():
-            print(f"  {k}: {v}")
+            _log.debug(f"  {k}: {v}")
         return "OK"
 
     def get_config(self) -> dict:

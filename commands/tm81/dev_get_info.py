@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/dev_get_info.py — Get Device Info (CMD 0x1A)
 Response payload (20 bytes):
   [0]    Sensor Intensity
@@ -58,7 +60,7 @@ class DevGetInfo(TM81Command):
         self._last_payload = d
         self._last_info = info
         for k, v in info.items():
-            print(f"  {k}: {v}")
+            _log.debug(f"  {k}: {v}")
 
         return "OK"
 

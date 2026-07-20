@@ -1,4 +1,6 @@
 """commands/tm81/user_set_config.py — Set User Config (CMD 0x07)
+import logging
+_log = logging.getLogger(__name__)
 
 Kirim:
   activation(1B) + initial_counter(4B) + counter_res(1B) +
@@ -40,7 +42,7 @@ class UserSetConfig(TM81Command):
         result = self.xfer(CmdId.USR_SET_CFG, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  User Set Config → OK")
+        _log.debug(f"  User Set Config → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

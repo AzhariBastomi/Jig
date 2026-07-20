@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_dev_eui.py — Set DevEUI (CMD 0x0F)
+import logging
+_log = logging.getLogger(__name__)
 
 Default DevEUI dapat di-override lewat params di tm81_test.json:
     "params": {"dev_eui": "0080E1010101010A"}
@@ -25,7 +27,7 @@ class LoraSetDevEui(TM81Command):
         result = self.xfer(CmdId.SET_DEV_EUI, self._dev_eui)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  Set DevEUI={self._dev_eui.hex(':')} → OK")
+        _log.debug(f"  Set DevEUI={self._dev_eui.hex(':')} → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

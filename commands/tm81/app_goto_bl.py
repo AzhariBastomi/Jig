@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/app_goto_bl.py — Reboot ke Bootloader (CMD 0x05)
 Kirim dari App mode → masuk Bootloader mode (untuk OTA IrDA).
 """
@@ -21,7 +23,7 @@ class AppGotoBL(TM81Command):
         result = self.xfer(CmdId.USR_REBOOT_BOOTLOADER, data=data, timeout=5.0)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  App → Bootloader OK")
+        _log.debug("  App → Bootloader OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

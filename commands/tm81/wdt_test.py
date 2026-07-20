@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/wdt_test.py — Test Watchdog Timer (CMD 0x0D)
 Device akan reset via WDT setelah command ini → koneksi putus adalah hasil normal.
 """
@@ -18,7 +20,7 @@ class WdtTest(TM81Command):
         result = self.xfer(CmdId.USR_TEST_WDT, timeout=5.0)
         # Device reset setelah WDT, ACK atau timeout dua-duanya normal
         if result.error in ("ACK", "Timeout"):
-            print("  WDT Test → device akan reset (normal)")
+            _log.debug("  WDT Test → device akan reset (normal)")
             return "OK"
         if not result.valid:
             return f"NG:{result.error}"

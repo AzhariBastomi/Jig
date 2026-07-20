@@ -12,6 +12,8 @@ except ImportError:
     from commands.tm81.base import TM81Command, CmdId
 
 import datetime
+import logging
+_log = logging.getLogger(__name__)
 
 
 class LoraGetLastSubmitTime(TM81Command):
@@ -28,7 +30,7 @@ class LoraGetLastSubmitTime(TM81Command):
         ts      = int.from_bytes(d[0:4], "little")
         dt_str  = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._ts = ts
-        print(f"  Last Submit Time: {dt_str} (unix={ts})")
+        _log.debug(f"  Last Submit Time: {dt_str} (unix={ts})")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

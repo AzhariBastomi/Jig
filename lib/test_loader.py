@@ -63,10 +63,11 @@ def update_context(data: dict) -> None:
     with _context_lock:
         context.update(data)
 
-_ROOT          = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_FLASH_JSON    = os.path.join(_ROOT, "json", "flash.json")
-_VOLTAGE_JSON  = os.path.join(_ROOT, "json", "voltage.json")
-_TM81_JSON     = os.path.join(_ROOT, "json", "tm81_test.json")
+_ROOT               = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+_FLASH_JSON         = os.path.join(_ROOT, "json", "flash.json")
+_VOLTAGE_JSON       = os.path.join(_ROOT, "json", "voltage.json")
+_TM81_JSON          = os.path.join(_ROOT, "json", "tm81_test.json")
+_COMMISSIONING_JSON = os.path.join(_ROOT, "json", "commissioning.json")
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +174,42 @@ def _read_tm81_json() -> dict:
         return {}
 
 
+def _read_commissioning_json() -> dict:
+    """
+    Baca commissioning.json (ditulis oleh CommissioningDialog).
+    Return {} jika file belum ada.
+    Strukturnya sama dengan bagian 'commissioning' di tm81_test.json.
+    """
+    try:
+        with open(_COMMISSIONING_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _merge_commissioning(base: dict) -> dict:
+    """
+    Gabungkan commissioning.json (prioritas lebih tinggi) ke atas commissioning
+    dari tm81_test.json. Return dict yang sudah di-merge.
+    """
+    ext = _read_commissioning_json()
+    if not ext:
+        return base
+    merged = dict(base)
+    for key, val in ext.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, dict) and isinstance(merged.get(key), dict):
+            # Merge per-key, skip _doc fields
+            merged[key] = {
+                **merged.get(key, {}),
+                **{k: v for k, v in val.items() if not k.startswith("_")},
+            }
+        else:
+            merged[key] = val
+    return merged
+
+
 def _make_tm81_item(entry: dict, commissioning: dict = None):
     """Buat AutoTest untuk satu entry di tm81_test.json.
 
@@ -249,7 +286,7 @@ def _tm81_enabled(entry: dict) -> bool:
 def load_tm81_tests() -> list:
     """Baca tm81_test.json dan kembalikan list TestItem — satu per entry."""
     cfg           = _read_tm81_json()
-    commissioning = cfg.get("commissioning", {})
+    commissioning = _merge_commissioning(cfg.get("commissioning", {}))
     return [_make_tm81_item(e, commissioning)
             for e in cfg.get("tests", []) if _tm81_enabled(e)]
 
@@ -333,7 +370,7 @@ def load_test(module_name: str):
     if module_name.startswith("tm81:"):
         entry_name    = module_name[len("tm81:"):]
         cfg           = _read_tm81_json()
-        commissioning = cfg.get("commissioning", {})
+        commissioning = _merge_commissioning(cfg.get("commissioning", {}))
         for e in cfg.get("tests", []):
             if e.get("name") == entry_name:
                 if not _tm81_enabled(e):

@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_dev_addr.py — Set DevAddr (CMD 0x13)"""
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:
@@ -21,7 +23,7 @@ class LoraSetDevAddr(TM81Command):
         result = self.xfer(CmdId.SET_DEV_ADDR, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  Set DevAddr=0x{self._dev_addr:08X} → OK")
+        _log.debug(f"  Set DevAddr=0x{self._dev_addr:08X} → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

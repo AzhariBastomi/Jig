@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_config.py — Set LoRa Config (CMD 0x1D)
+import logging
+_log = logging.getLogger(__name__)
 
 Kirim: tx_power(1B) + data_rate(1B) + rx1_delay_sec(1B)
 """
@@ -28,7 +30,7 @@ class LoraSetConfig(TM81Command):
         result = self.xfer(CmdId.SET_LORA_DATA, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  Set LoRa Config: TxPwr={self._tx_power} DR={self._data_rate} RX1Delay={self._rx1_delay}s → OK")
+        _log.debug(f"  Set LoRa Config: TxPwr={self._tx_power} DR={self._data_rate} RX1Delay={self._rx1_delay}s → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

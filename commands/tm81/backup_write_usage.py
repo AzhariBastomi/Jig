@@ -11,6 +11,8 @@ except ImportError:
     _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
     from commands.tm81.base import TM81Command, CmdId
 from datetime import datetime
+import logging
+_log = logging.getLogger(__name__)
 
 
 class BackupWriteUsage(TM81Command):
@@ -45,7 +47,7 @@ class BackupWriteUsage(TM81Command):
         result = self.xfer(CmdId.USAGE_HISTORY_WRITE, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print("  Backup Write Usage → OK")
+        _log.debug("  Backup Write Usage → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

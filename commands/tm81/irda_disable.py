@@ -1,4 +1,6 @@
 """commands/tm81/irda_disable.py — IrDA Disable (CMD 0x01)"""
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:
@@ -13,7 +15,7 @@ class IrdaDisable(TM81Command):
         result = self.xfer(CmdId.IRDA_DISABLE)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print("  IrDA Disable → OK")
+        _log.debug("  IrDA Disable → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

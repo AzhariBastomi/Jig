@@ -17,6 +17,8 @@ Architecture
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
 
+APP_VERSION = "0.5.0"
+
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(line_buffering=True)
@@ -47,7 +49,7 @@ if _ROOT not in sys.path:
 from controllers.keepalive   import KeepaliveManager
 from controllers.test_controller import TestController
 from ui.test_list_panel      import TestListPanel
-from ui.dialogs              import DisplaySettingsDialog, AddTestDialog
+from ui.dialogs              import DisplaySettingsDialog, AddTestDialog, CommissioningDialog
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -72,7 +74,7 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Test Point")
+        self.title(f"Test Point  v{APP_VERSION}")
         self.configure(bg=COLORS["bg"])
         self.report_callback_exception = self._on_tk_error
 
@@ -130,6 +132,12 @@ class App(tk.Tk):
         self._proj_lbl.pack(side="left")
 
         tk.Button(
+            top, text="⚙ Commissioning", command=self._open_commissioning,
+            bg=COLORS["header_bg"], fg="#f39c12", relief="flat",
+            font=("TkDefaultFont", fs("button")), cursor="hand2",
+        ).pack(side="right", padx=6)
+
+        tk.Button(
             top, text="⚙ Display", command=self._open_display_settings,
             bg=COLORS["header_bg"], fg="white", relief="flat",
             font=("TkDefaultFont", fs("button")), cursor="hand2",
@@ -141,13 +149,16 @@ class App(tk.Tk):
             font=("TkDefaultFont", fs("button")), cursor="hand2",
         ).pack(side="right", padx=6)
 
-        # ── Input area ───────────────────────────────────────────────
-        inp_frame = tk.Frame(self, bg=COLORS["bg"], pady=6)
+        # ── Input area (surface bg + bottom border) ───────────────────
+        _inp_wrap = tk.Frame(self, bg=COLORS["surface"])
+        _inp_wrap.pack(fill="x")
+        inp_frame = tk.Frame(_inp_wrap, bg=COLORS["surface"], pady=6)
         inp_frame.pack(fill="x", padx=10)
+        tk.Frame(_inp_wrap, height=1, bg=COLORS["border"]).pack(fill="x")
 
         tk.Label(
             inp_frame, text="Device ID / Serial No.:",
-            bg=COLORS["bg"], fg=COLORS["text"],
+            bg=COLORS["surface"], fg=COLORS["text"],
             font=("TkDefaultFont", fs("label")),
         ).pack(side="left")
 
@@ -163,6 +174,10 @@ class App(tk.Tk):
         _dev_entry = tk.Entry(
             inp_frame, textvariable=self._device_var,
             font=("TkDefaultFont", fs("label")), width=20,
+            bg=COLORS["card"], fg=COLORS["text"],
+            insertbackground=COLORS["text"], relief="flat",
+            highlightthickness=1, highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["running"],
         )
         _dev_entry.pack(side="left", padx=6)
         # FocusOut dan Return → pindah device, siapkan DB session (background)
@@ -171,7 +186,7 @@ class App(tk.Tk):
 
         tk.Label(
             inp_frame, text="Station:",
-            bg=COLORS["bg"], fg=COLORS["text"],
+            bg=COLORS["surface"], fg=COLORS["text"],
             font=("TkDefaultFont", fs("label")),
         ).pack(side="left", padx=(12, 0))
 
@@ -180,11 +195,18 @@ class App(tk.Tk):
         tk.Entry(
             inp_frame, textvariable=self._station_var,
             font=("TkDefaultFont", fs("label")), width=28,
+            bg=COLORS["card"], fg=COLORS["text"],
+            insertbackground=COLORS["text"], relief="flat",
+            highlightthickness=1, highlightbackground=COLORS["border"],
+            highlightcolor=COLORS["running"],
         ).pack(side="left", padx=6)
 
-        # ── Action bar ───────────────────────────────────────────────
-        act_frame = tk.Frame(self, bg=COLORS["bg"], pady=4)
+        # ── Action bar (surface bg + bottom border) ───────────────────
+        _act_wrap = tk.Frame(self, bg=COLORS["surface"])
+        _act_wrap.pack(fill="x")
+        act_frame = tk.Frame(_act_wrap, bg=COLORS["surface"], pady=4)
         act_frame.pack(fill="x", padx=10)
+        tk.Frame(_act_wrap, height=1, bg=COLORS["border"]).pack(fill="x")
 
         # Disabled by default — aktif setelah SN diisi (OPTIMIZE #19)
         self._toggle_btn = tk.Button(
@@ -197,7 +219,7 @@ class App(tk.Tk):
         )
         self._toggle_btn.pack(side="left")
 
-        tk.Frame(act_frame, width=1, bg="#cccccc").pack(side="left", fill="y", padx=8, pady=4)
+        tk.Frame(act_frame, width=1, bg=COLORS["border"]).pack(side="left", fill="y", padx=8, pady=4)
 
         tk.Button(
             act_frame, text="🗑  Clear",
@@ -210,7 +232,7 @@ class App(tk.Tk):
         self._status_var = tk.StringVar(value="Ready")
         tk.Label(
             act_frame, textvariable=self._status_var,
-            bg=COLORS["bg"], fg=COLORS["text"],
+            bg=COLORS["surface"], fg=COLORS["text"],
             font=("TkDefaultFont", fs("small")),
         ).pack(side="right")
 
@@ -357,6 +379,9 @@ class App(tk.Tk):
             child.destroy()
         self._build()
         self._list_panel.load_tests(self._tests)
+
+    def _open_commissioning(self):
+        CommissioningDialog(self)
 
     def _open_add_test(self):
         AddTestDialog(self, on_add=self._add_test, current_project=self._project)

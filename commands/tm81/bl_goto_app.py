@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/bl_goto_app.py — Bootloader → Lompat ke App (CMD BL 0x66)
 """
 
@@ -20,7 +22,7 @@ class BLGotoApp(TM81Command):
         result = self.xfer(CmdId.BL_GOTO_APP, data=data, timeout=5.0)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  Bootloader → App OK")
+        _log.debug("  Bootloader → App OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

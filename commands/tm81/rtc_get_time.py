@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/rtc_get_time.py - Get RTC Time (CMD 0x0A)
 Response payload (6 bytes): year(2digit), month, day, hour, minute, second.
 """
@@ -25,7 +27,7 @@ class RtcGetTime(TM81Command):
 
         yr, month, day, hr, mn, sec = d[0], d[1], d[2], d[3], d[4], d[5]
         self._time_str = f"20{yr:02d}-{month:02d}-{day:02d} {hr:02d}:{mn:02d}:{sec:02d}"
-        print(f"  RTC Time: {self._time_str}")
+        _log.debug(f"  RTC Time: {self._time_str}")
         return f"OK:{self._time_str}"
 
     def get_time(self) -> str:

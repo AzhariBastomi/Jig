@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/sensor_do_reset_config.py — Sensor Reset Config (CMD 0x03)
 """
 
@@ -17,7 +19,7 @@ class SensorDoResetConfig(TM81Command):
         result = self.xfer(CmdId.SENSOR_RESET_CONFIG)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  Sensor Reset Config → OK")
+        _log.debug("  Sensor Reset Config → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

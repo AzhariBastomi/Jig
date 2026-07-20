@@ -176,7 +176,7 @@ class FrameParser(BaseParser):
 
 
 # =============================================================================
-# CRCParser — parsing + validasi CRC
+# TM81Parser — protocol TM81 IrDA via CH340
 # =============================================================================
 
 class TM81Parser(BaseParser):
@@ -197,10 +197,10 @@ class TM81Parser(BaseParser):
         crc_bigend : urutan byte CRC, default False (little-endian)
     """
 
-    ACK           = b""
-    NAK           = b""
-    EOT           = b""
-    HEADER_PREFIX = b""
+    ACK           = b"\x11"
+    NAK           = b"\x0f"
+    EOT           = b"\x04"
+    HEADER_PREFIX = b"\x01\x0f"
 
     def __init__(self, crc_type: str = "crc32mpeg2",
                  crc_bytes: int = 4, crc_bigend: bool = False):
@@ -219,18 +219,18 @@ class TM81Parser(BaseParser):
         cmd_bytes = (
             b"\x01\x0f\x00"
             + cmd_len
-            + b""
+            + b"\x02"
             + cmd_id.to_bytes(1, "little")
             + data
-            + b""
+            + b"\x03"
         )
         crc_val   = self._calc_crc(cmd_bytes)
         crc_b     = crc_val.to_bytes(self._crc_bytes,
                                      "big" if self._crc_bigend else "little")
-        frame     = b"\xff\xff" + cmd_bytes + crc_b + b""
+        frame     = b"\xff\xff" + cmd_bytes + crc_b + b"\x04"
         hex_str   = " ".join(f"{b:02x}" for b in frame)
-        print(f"[TM81 TX] cmd=0x{cmd_id:02x} crc={crc_val:#010x} len={len(frame)}B  {hex_str}",
-              flush=True)
+        log.debug("[TM81 TX] cmd=0x%02x crc=%#010x len=%dB  %s",
+                  cmd_id, crc_val, len(frame), hex_str)
         return frame
 
     def parse(self, buf: bytearray) -> Optional[ParseResult]:
@@ -238,13 +238,13 @@ class TM81Parser(BaseParser):
 
         # --- ACK ---
         if raw == self.ACK:
-            print("[TM81 RX] ACK (0x11)", flush=True)
+            log.debug("[TM81 RX] ACK (0x11)")
             self._buf.clear()
-            return ParseResult(raw=raw, payload=b"", valid=True, error="ACK")
+            return ParseResult(raw=raw, payload=b"", valid=True, error="ACK")
 
         # --- NAK ---
         if raw == self.NAK:
-            print("[TM81 RX] NAK (0x0f)", flush=True)
+            log.debug("[TM81 RX] NAK (0x0f)")
             self._buf.clear()
             return ParseResult(raw=raw, payload=b"", valid=False, error="NAK")
 
@@ -255,7 +255,6 @@ class TM81Parser(BaseParser):
                 self._buf = bytearray(raw[raw.index(self.ACK[0]):])
                 return None
             # Simpan byte terakhir jika bisa jadi awal HEADER_PREFIX
-            # (misal: sudah terima 0x01, tunggu 0x0f berikutnya)
             if raw and raw[-1] == self.HEADER_PREFIX[0]:
                 self._buf = bytearray(raw[-1:])
             else:
@@ -280,9 +279,9 @@ class TM81Parser(BaseParser):
         crc_size = self._crc_bytes
         payload  = frame[5: -(crc_size + 2)] if len(frame) >= 11 else b""
         hex_str  = " ".join(f"{b:02x}" for b in frame)
-        print(f"[TM81 RX] len={len(frame)}B  {hex_str}", flush=True)
+        log.debug("[TM81 RX] len=%dB  %s", len(frame), hex_str)
         if payload:
-            print(f"[TM81 RX] payload={payload.hex(' ')}", flush=True)
+            log.debug("[TM81 RX] payload=%s", payload.hex(" "))
         self._buf = bytearray(raw[eot_idx + 1:])
         return ParseResult(raw=frame, payload=payload, valid=True)
 
@@ -466,6 +465,14 @@ class SerialComm:
             except serial.SerialException as e:
                 log.warning("Reader error: %s", e)
                 break
+        # Pastikan port ditutup dan di-clear agar is_connected() return False
+        try:
+            if self._port and self._port.is_open:
+                self._port.close()
+        except Exception:
+            pass
+        self._port = None
+
         if not self._disconnected:
             self._disconnected = True
             with self._lock:

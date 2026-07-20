@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_join_eui.py — Set JoinEUI (CMD 0x10)"""
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:
@@ -21,7 +23,7 @@ class LoraSetJoinEui(TM81Command):
         result = self.xfer(CmdId.SET_JOIN_EUI, self._join_eui)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  Set JoinEUI={self._join_eui.hex(':')} → OK")
+        _log.debug(f"  Set JoinEUI={self._join_eui.hex(':')} → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

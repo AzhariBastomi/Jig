@@ -21,9 +21,12 @@ Cara pakai:
 """
 
 from __future__ import annotations
+import logging
 import os, sys, json
 from typing import Optional
 from serial_comm import SerialComm, SerialConfig, FrameParser, RawLineParser, TM81Parser
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -154,14 +157,14 @@ def connect(conn: str = None, parser=None) -> bool:
     try:
         cfg = _make_config(name)
     except KeyError as e:
-        print(f"[serial_manager] {e}")
+        _log.error("[serial_manager] %s", e)
         return False
 
     prs  = parser or _make_parser(name)
     comm = SerialComm(cfg, prs)
     # Jika ada port langsung (misal bluetooth), lewati device_name scan
     direct = _direct_port(name)
-    ok   = comm.connect(port=direct)  # port=None → auto-find via device_name
+    ok   = comm.connect(port=direct)  # port=None -> auto-find via device_name
     if ok:
         _conns[name] = comm
         # Jika debug_rx=true di config.json, cetak semua data masuk ke terminal
@@ -175,11 +178,11 @@ def _register_debug_rx(comm: SerialComm, name: str):
     def _on_data(frame):
         if frame.valid:
             payload = frame.payload.decode("utf-8", errors="replace").strip()
-            print(f"[{name}] RX: {payload!r}", flush=True)
+            _log.debug("[%s] RX: %r", name, payload)
         else:
             raw = frame.raw.decode("utf-8", errors="replace").strip()
             if raw:
-                print(f"[{name}] RX (raw): {raw!r}", flush=True)
+                _log.debug("[%s] RX (raw): %r", name, raw)
     comm.on_data(_on_data)
 
 
@@ -241,5 +244,6 @@ def send_and_wait(command: str, conn: str = None, timeout: float = 5.0) -> str:
 
 try:
     DEFAULT_CONFIG = _make_config(DEFAULT_CONN)
-except KeyError:
-    DEFAULT_CONFIG = SerialConfig()
+except KeyError as e:
+    _log.error("[serial_manager] %s", e)
+    DEFAULT_CONFIG = None

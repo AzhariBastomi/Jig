@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/user_get_config.py - Get User Config (CMD 0x08)
 """
 
@@ -38,14 +40,14 @@ class UserGetConfig(TM81Command):
         tz   = f"GMT{chr(43) if tz_val>0 else chr(45)}{abs(tz_val)}"
         msg  = self.MSG_TYPE.get(d[13], d[13])
 
-        print(f"  Activation   : {act}")
-        print(f"  Init usage   : {init_counter:.2f} m3")
-        print(f"  Last usage   : {last_counter:.2f} m3")
-        print(f"  Counter res  : {res}")
-        print(f"  Alarm byte   : 0x{d[10]:02x}")
-        print(f"  Submit rate  : {rate}")
-        print(f"  Timezone     : {tz}")
-        print(f"  Msg type     : {msg}")
+        _log.debug(f"  Activation   : {act}")
+        _log.debug(f"  Init usage   : {init_counter:.2f} m3")
+        _log.debug(f"  Last usage   : {last_counter:.2f} m3")
+        _log.debug(f"  Counter res  : {res}")
+        _log.debug(f"  Alarm byte   : 0x{d[10]:02x}")
+        _log.debug(f"  Submit rate  : {rate}")
+        _log.debug(f"  Timezone     : {tz}")
+        _log.debug(f"  Msg type     : {msg}")
 
         lines = (
             f"Activation: {act}\n"

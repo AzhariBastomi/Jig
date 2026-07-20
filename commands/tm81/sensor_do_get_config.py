@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/sensor_do_get_config.py — Sensor Get Config trigger (CMD 0x02)
 Perintah device untuk menjalankan satu siklus sensor.
 """
@@ -18,7 +20,7 @@ class SensorDoGetConfig(TM81Command):
         result = self.xfer(CmdId.SENSOR_GET_CONFIG)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  Sensor Get Config → OK")
+        _log.debug("  Sensor Get Config → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

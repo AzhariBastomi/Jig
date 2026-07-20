@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/user_synch_config.py — Sync User Config (CMD 0x06)
 """
 
@@ -17,7 +19,7 @@ class UserSynchConfig(TM81Command):
         result = self.xfer(CmdId.USR_SYNC_CFG)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        print("  User Sync Config → OK")
+        _log.debug("  User Sync Config → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

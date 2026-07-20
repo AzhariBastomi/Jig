@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/user_get_version.py - Get Firmware Version (CMD 0x0C)
 Response payload (6 bytes): major, minor, patch, bl_major, bl_minor, bl_patch.
 """
@@ -25,8 +27,8 @@ class UserGetVersion(TM81Command):
 
         self._app_version = f"v{d[0]}.{d[1]}.{d[2]}"
         self._bl_version  = f"v{d[3]}.{d[4]}.{d[5]}" if len(d) >= 6 else "N/A"
-        print(f"  App Version: {self._app_version}")
-        print(f"  Bootloader Version: {self._bl_version}")
+        _log.debug(f"  App Version: {self._app_version}")
+        _log.debug(f"  Bootloader Version: {self._bl_version}")
         return f"OK:App {self._app_version} / BL {self._bl_version}"
 
     def get_version(self) -> str:

@@ -1,4 +1,6 @@
 """commands/tm81/lora_set_nw_key.py — Set NwKey (CMD 0x12)"""
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:
@@ -21,7 +23,7 @@ class LoraSetNwKey(TM81Command):
         result = self.xfer(CmdId.SET_NW_KEY, self._nw_key)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print(f"  Set NwKey={self._nw_key.hex(':')} → OK")
+        _log.debug(f"  Set NwKey={self._nw_key.hex(':')} → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

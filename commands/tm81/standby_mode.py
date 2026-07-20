@@ -1,4 +1,6 @@
 """commands/tm81/standby_mode.py — Enter Standby Mode (CMD 0x0E)"""
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:
@@ -13,7 +15,7 @@ class StandbyMode(TM81Command):
         result = self.xfer(CmdId.ENTER_STANDBY)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        print("  Standby Mode → OK")
+        _log.debug("  Standby Mode → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

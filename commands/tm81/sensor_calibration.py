@@ -1,4 +1,6 @@
 """
+import logging
+_log = logging.getLogger(__name__)
 commands/tm81/sensor_calibration.py - Sensor Calibration (CMD 0x02 + 0x04)
 Loop: get_config -> get_data -> cek status bit -> konfirmasi operator.
 Tipe: MANUAL (operator confirm saat calibration done).
@@ -50,11 +52,11 @@ class SensorCalibration(TM81Command):
             # 1. Trigger sensor cycle (SENSOR_GET_CONFIG)
             r = self.xfer(CmdId.SENSOR_GET_CONFIG, timeout=3.0)
             if not r.valid and r.error != "ACK":
-                print(f"  [cal] sensor_get_config fail: {r.error}")
+                _log.debug(f"  [cal] sensor_get_config fail: {r.error}")
                 time.sleep(2)
                 continue
             if self._resp_cmd(r) != CmdId.SENSOR_GET_CONFIG:
-                print(f"  [cal] wrong response cmd=0x{self._resp_cmd(r):02x}, skip")
+                _log.debug(f"  [cal] wrong response cmd=0x{self._resp_cmd(r):02x}, skip")
                 time.sleep(2)
                 continue
 
@@ -63,18 +65,18 @@ class SensorCalibration(TM81Command):
             # 2. Baca hasil - device butuh ~4-5s, gunakan timeout 6s
             r = self.xfer(CmdId.SENSOR_GET_DATA, timeout=6.0)
             if not r.valid:
-                print(f"  [cal] sensor_get_data fail: {r.error}")
+                _log.debug(f"  [cal] sensor_get_data fail: {r.error}")
                 time.sleep(2)
                 continue
 
             if not r.payload or len(r.payload) < 1:
-                print("  [cal] empty payload, retry")
+                _log.debug("  [cal] empty payload, retry")
                 continue
 
             status_byte = r.payload[0]
             err = self._check_cal_status(status_byte)
             if err:
-                print(f"  [cal] attempt {attempt+1}/{max_attempts}: {err}")
+                _log.debug(f"  [cal] attempt {attempt+1}/{max_attempts}: {err}")
                 continue
 
             # Status OK

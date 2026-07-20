@@ -17,6 +17,8 @@ _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 
 import os
 import time
 from crccheck.crc import Crc32Mpeg2
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId
@@ -58,8 +60,8 @@ class BLWriteFirmware(TM81Command):
         if self._fill_with_ff and fw_size < self.APP_MAX_SIZE:
             fw_data += b"\xff" * (self.APP_MAX_SIZE - fw_size)
 
-        print(f"  FW: {os.path.basename(self._fw_path)}")
-        print(f"  Size: {fw_size} B  CRC: {crc_bytes.hex(' ')}")
+        _log.debug(f"  FW: {os.path.basename(self._fw_path)}")
+        _log.debug(f"  Size: {fw_size} B  CRC: {crc_bytes.hex(' ')}")
 
         # Step 1: BL_SET_RDY — kirim fw_size + CRC
         r = self._bl_set_rdy(fw_size, crc_bytes)
@@ -86,7 +88,7 @@ class BLWriteFirmware(TM81Command):
         result = self.xfer(CmdId.BL_SET_RDY, data, timeout=8.0)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:BL_SET_RDY {result.error}"
-        print("  BL_SET_RDY → ACK")
+        _log.debug("  BL_SET_RDY → ACK")
         return "OK"
 
     def _bl_send_chunks(self, fw_data: bytes) -> str:
@@ -111,13 +113,12 @@ class BLWriteFirmware(TM81Command):
             sent     += chunk_len
             frame_id += 1
             pct       = sent / total * 100
-            print(f"  [{frame_id}] {sent}/{total} B  {pct:.1f}%", end="\r")
+            _log.debug("  [%d] %d/%d B  %.1f%%", frame_id, sent, total, pct)
 
             if self._progress_cb:
                 self._progress_cb(pct)
 
-        print()  # newline setelah \r
-        print(f"  Semua {frame_id} chunk terkirim")
+        _log.debug(f"  Semua {frame_id} chunk terkirim")
         return "OK"
 
     def _bl_goto_app(self) -> str:
@@ -125,7 +126,7 @@ class BLWriteFirmware(TM81Command):
         result = self.xfer(CmdId.BL_GOTO_APP, data, timeout=3.0)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:BL_GOTO_APP {result.error}"
-        print("  BL_GOTO_APP → OK")
+        _log.debug("  BL_GOTO_APP → OK")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────

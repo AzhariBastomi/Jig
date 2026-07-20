@@ -11,6 +11,8 @@ except ImportError:
     _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "..", "..", "lib"))
     from commands.tm81.base import TM81Command, CmdId
 from datetime import datetime
+import logging
+_log = logging.getLogger(__name__)
 
 
 class BackupReadUsage(TM81Command):
@@ -46,10 +48,10 @@ class BackupReadUsage(TM81Command):
                 if base + 3 >= len(d):
                     break
                 raw = int.from_bytes(d[base:base+4], "little")
-                print(f"  Day {i:2d}: {raw/divisor:.2f} m3")
+                _log.debug(f"  Day {i:2d}: {raw/divisor:.2f} m3")
         else:
             raw = int.from_bytes(d[:4], "little")
-            print(f"  Day {self._day}/{self._month}: {raw/divisor:.2f} m3")
+            _log.debug(f"  Day {self._day}/{self._month}: {raw/divisor:.2f} m3")
         return "OK"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
