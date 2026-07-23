@@ -16,6 +16,32 @@ if _LIB not in sys.path:
 
 log = logging.getLogger("keepalive")
 
+# ── Global pause + lock ───────────────────────────────────────────────────────
+# _PAUSE_EVT : saat di-set, _run() skip ping tanpa menghentikan thread.
+# _PING_LOCK : di-hold selama ping sedang berjalan.
+#              pause_global() mencoba acquire lock → jika ping sedang berjalan,
+#              ia MENUNGGU sampai ping selesai sebelum OTA mulai menulis ke port.
+#              Ini eliminasi race condition antara ping thread dan OTA thread.
+_PAUSE_EVT = threading.Event()
+_PING_LOCK  = threading.Lock()
+
+def pause_global():
+    """
+    Pause keepalive ping. Menunggu ping yang sedang berjalan selesai
+    sebelum return — aman memanggil ini lalu langsung menulis ke serial.
+    """
+    _PAUSE_EVT.set()
+    # Tunggu ping yang sedang berjalan (jika ada) selesai melepas lock
+    acquired = _PING_LOCK.acquire(timeout=5.0)
+    if acquired:
+        _PING_LOCK.release()
+    log.debug("[PING] paused — no ping in flight")
+
+def resume_global():
+    """Resume keepalive ping setelah pause."""
+    _PAUSE_EVT.clear()
+    log.debug("[PING] resumed")
+
 # Error yang menandakan port serial rusak / perlu reconnect
 _SERIAL_ERR_KEYWORDS = (
     "writefile", "permissionerror", "access is denied",
@@ -55,6 +81,11 @@ class KeepaliveManager:
     @property
     def connection(self) -> str:
         return self._cfg.get("connection", "ch340")
+
+    @property
+    def log_tx_rx(self) -> bool:
+        """Jika False (default), TX/RX debug log dari serial comm di-suppress saat ping."""
+        return self._cfg.get("log_tx_rx", False)
 
     def _is_serial_error(self, result: str) -> bool:
         lower = result.lower()
@@ -124,39 +155,58 @@ class KeepaliveManager:
 
         _state = "unknown"
 
+        _serial_log = logging.getLogger(f"serial_comm.{self.connection}")
+
         while not self._stop_evt.wait(self.interval):
-            try:
-                result = str(Ping().execute()).strip()
+            # Skip ping jika sedang di-pause (misal saat OTA berlangsung)
+            if _PAUSE_EVT.is_set():
+                continue
 
-                if result.upper().startswith("OK"):
-                    if _state != "connected":
-                        log.info("[PING] aktif ke %r", self.connection)
-                        _state = "connected"
-                    log.debug("[PING] OK")
+            # Hold _PING_LOCK selama ping berlangsung.
+            # pause_global() akan acquire lock ini → menunggu ping selesai
+            # sebelum OTA mulai menulis ke serial port (eliminasi race condition).
+            with _PING_LOCK:
+                if _PAUSE_EVT.is_set():  # re-check setelah acquire lock
+                    continue
 
-                elif "tidak terhubung" in result.lower():
+                try:
+                    if not self.log_tx_rx:
+                        _serial_log.setLevel(logging.INFO)
+                    result = str(Ping().execute()).strip()
+                    if not self.log_tx_rx:
+                        _serial_log.setLevel(logging.NOTSET)
+
+                    if result.upper().startswith("OK"):
+                        if _state != "connected":
+                            log.info("[PING] aktif ke %r", self.connection)
+                            _state = "connected"
+                        log.debug("[PING] OK")
+
+                    elif "tidak terhubung" in result.lower():
+                        if _state != "disconnected":
+                            log.info("[PING] %r belum terhubung, scan port...", self.connection)
+                            _state = "disconnected"
+                        if self._try_connect():
+                            _state = "connected"
+
+                    elif self._is_serial_error(result):
+                        if _state != "disconnected":
+                            log.warning("[PING] serial error — disconnect & reconnect: %s", result)
+                            _state = "disconnected"
+                        self._disconnect()
+                        if self._stop_evt.wait(2.0):
+                            break
+                        if self._try_connect():
+                            _state = "connected"
+
+                    else:
+                        # Device NG (Timeout, NAK) — port masih OK, lanjutkan
+                        log.debug("[PING] device NG: %s", result)
+
+                except Exception as e:
+                    if not self.log_tx_rx:
+                        _serial_log.setLevel(logging.NOTSET)
                     if _state != "disconnected":
-                        log.info("[PING] %r belum terhubung, scan port...", self.connection)
-                        _state = "disconnected"
-                    if self._try_connect():
-                        _state = "connected"
-
-                elif self._is_serial_error(result):
-                    if _state != "disconnected":
-                        log.warning("[PING] serial error — disconnect & reconnect: %s", result)
+                        log.warning("[PING] exception — disconnect & reconnect: %s", e)
                         _state = "disconnected"
                     self._disconnect()
-                    if self._stop_evt.wait(2.0):
-                        break
-                    if self._try_connect():
-                        _state = "connected"
-
-                else:
-                    # Device NG (Timeout, NAK) — port masih OK, lanjutkan
-                    log.debug("[PING] device NG: %s", result)
-
-            except Exception as e:
-                if _state != "disconnected":
-                    log.warning("[PING] exception — disconnect & reconnect: %s", e)
-                    _state = "disconnected"
-                self._disconnect()

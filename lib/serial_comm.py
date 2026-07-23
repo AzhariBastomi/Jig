@@ -202,35 +202,87 @@ class TM81Parser(BaseParser):
     EOT           = b"\x04"
     HEADER_PREFIX = b"\x01\x0f"
 
+    # Nama command TM81 untuk log TX yang lebih informatif
+    _CMD_NAMES: "dict[int, str]" = {
+        0x00: "PING",              0x01: "IRDA_DISABLE",
+        0x02: "SENSOR_GET_CFG",   0x03: "SENSOR_RESET_CFG",
+        0x04: "SENSOR_GET_DATA",  0x05: "USR_REBOOT_BL",
+        0x06: "USR_SYNC_CFG",     0x07: "USR_SET_CFG",
+        0x08: "USR_GET_CFG",      0x09: "USR_RESET_CFG",
+        0x0A: "USR_GET_TIME",     0x0B: "USR_SET_TIME",
+        0x0C: "USR_GET_VER",      0x0D: "USR_TEST_WDT",
+        0x0E: "ENTER_STANDBY",    0x0F: "SET_DEV_EUI",
+        0x10: "SET_JOIN_EUI",     0x11: "SET_APP_KEY",
+        0x12: "SET_NW_KEY",       0x13: "SET_DEV_ADDR",
+        0x14: "SET_JOIN_MODE",    0x15: "SET_DEV_CLASS",
+        0x16: "GET_LORA_DATA",    0x17: "FORCE_SEND_LORA",
+        0x18: "USAGE_READ",       0x19: "USAGE_WRITE",
+        0x1A: "GET_DEV_INFO",     0x1B: "DEV_GET_ID",
+        0x1C: "DEV_SET_ID",       0x1D: "SET_LORA_DATA",
+        0x1E: "GET_CHIP_ID",      0x1F: "CC_GET_TEMP",
+        0x20: "CC_RESET_ACR",     0x21: "CC_GET_ACR",
+        0x22: "SOFT_RESET",       0x23: "GET_LAST_SUBMIT",
+        100:  "BL_SET_RDY",       101:  "BL_FW_DATA",
+        102:  "BL_GOTO_APP",
+    }
+
     def __init__(self, crc_type: str = "crc32mpeg2",
                  crc_bytes: int = 4, crc_bigend: bool = False):
         super().__init__()
         self._crc_cls    = _CRC_MAP.get(crc_type, Crc32Mpeg2)
         self._crc_bytes  = crc_bytes
         self._crc_bigend = crc_bigend
+        self._log        = log  # default ke module logger; di-override oleh SerialComm
+
+    def set_logger(self, logger) -> None:
+        """Inject per-connection logger dari SerialComm agar TX/RX log masuk ke window yang benar."""
+        self._log = logger
 
     def _calc_crc(self, data: bytes) -> int:
         return self._crc_cls.calc(data)
 
     def build_send_frame(self, cmd_id: int, data: bytes = b"") -> bytes:
-        """Bangun frame TX lengkap untuk CMD_ID tertentu."""
+        """Bangun frame TX lengkap untuk CMD_ID tertentu.
+
+        Frame kecil  (total ≤ 255B): ff ff | 01 0f 00 | LEN(1B) | 02 | CMD | DATA | 03 | CRC | 04
+        Frame besar  (total > 255B): ff ff | 01 0f 00 | FF | 02 | CMD | EXT_LEN(2B LE) | DATA | 03 | CRC | 04
+          EXT_LEN disisipkan SETELAH CMD (bukan antara FF dan STX).
+          EXT_LEN = byte dari '01 0f 00' sampai '04' inklusif = 10 + data_len + crc_bytes.
+          CRC dihitung atas cmd_bytes yang sudah termasuk ext_len.
+        """
         data_len  = len(data)
-        cmd_len   = (12 + data_len).to_bytes(1, "little")
-        cmd_bytes = (
-            b"\x01\x0f\x00"
-            + cmd_len
-            + b"\x02"
-            + cmd_id.to_bytes(1, "little")
-            + data
-            + b"\x03"
-        )
+        total_len = 12 + data_len
+        if total_len <= 0xFF:
+            # Frame normal: cmd_len 1 byte
+            cmd_bytes = (
+                b"\x01\x0f\x00"
+                + total_len.to_bytes(1, "little")
+                + b"\x02"
+                + cmd_id.to_bytes(1, "little")
+                + data
+                + b"\x03"
+            )
+        else:
+            # Frame besar: cmd_len=0xFF, ext_len(2B LE) disisipkan setelah CMD
+            # ext_len = 10 + data_len + crc_bytes (byte dari prefix sampai EOT inklusif)
+            ext_len = (10 + data_len + self._crc_bytes).to_bytes(2, "little")
+            cmd_bytes = (
+                b"\x01\x0f\x00"
+                + b"\xff"
+                + b"\x02"
+                + cmd_id.to_bytes(1, "little")
+                + ext_len
+                + data
+                + b"\x03"
+            )
         crc_val   = self._calc_crc(cmd_bytes)
         crc_b     = crc_val.to_bytes(self._crc_bytes,
                                      "big" if self._crc_bigend else "little")
         frame     = b"\xff\xff" + cmd_bytes + crc_b + b"\x04"
         hex_str   = " ".join(f"{b:02x}" for b in frame)
-        log.debug("[TM81 TX] cmd=0x%02x crc=%#010x len=%dB  %s",
-                  cmd_id, crc_val, len(frame), hex_str)
+        cmd_name = self._CMD_NAMES.get(cmd_id, "?")
+        self._log.debug("[TM81 TX] cmd=0x%02x (%s) crc=%#010x len=%dB  %s",
+                        cmd_id, cmd_name, crc_val, len(frame), hex_str)
         return frame
 
     def parse(self, buf: bytearray) -> Optional[ParseResult]:
@@ -238,13 +290,13 @@ class TM81Parser(BaseParser):
 
         # --- ACK ---
         if raw == self.ACK:
-            log.debug("[TM81 RX] ACK (0x11)")
+            self._log.debug("[TM81 RX] ACK (0x11)")
             self._buf.clear()
             return ParseResult(raw=raw, payload=b"", valid=True, error="ACK")
 
         # --- NAK ---
         if raw == self.NAK:
-            log.debug("[TM81 RX] NAK (0x0f)")
+            self._log.debug("[TM81 RX] NAK (0x0f)")
             self._buf.clear()
             return ParseResult(raw=raw, payload=b"", valid=False, error="NAK")
 
@@ -279,9 +331,9 @@ class TM81Parser(BaseParser):
         crc_size = self._crc_bytes
         payload  = frame[5: -(crc_size + 2)] if len(frame) >= 11 else b""
         hex_str  = " ".join(f"{b:02x}" for b in frame)
-        log.debug("[TM81 RX] len=%dB  %s", len(frame), hex_str)
+        self._log.debug("[TM81 RX] len=%dB  %s", len(frame), hex_str)
         if payload:
-            log.debug("[TM81 RX] payload=%s", payload.hex(" "))
+            self._log.debug("[TM81 RX] payload=%s", payload.hex(" "))
         self._buf = bytearray(raw[eot_idx + 1:])
         return ParseResult(raw=frame, payload=payload, valid=True)
 
@@ -341,6 +393,9 @@ class SerialComm:
                      if conn_name else log)
 
         self._parser.set_frame_callback(self._on_frame)
+        # Inject per-connection logger ke parser agar TX/RX log pakai nama yang sama
+        if hasattr(self._parser, "set_logger"):
+            self._parser.set_logger(self._log)
 
     # ------------------------------------------------------------------
     # Port discovery

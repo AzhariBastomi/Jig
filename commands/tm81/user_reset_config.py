@@ -1,8 +1,9 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/user_reset_config.py — Reset User Config to Default (CMD 0x09)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

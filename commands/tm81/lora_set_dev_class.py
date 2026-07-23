@@ -1,9 +1,10 @@
 """commands/tm81/lora_set_dev_class.py — Set LoRa Device Class (CMD 0x15)
-import logging
-_log = logging.getLogger(__name__)
 
 dev_class: 0=A, 1=B, 2=C
 """
+
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:

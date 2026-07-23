@@ -1,10 +1,11 @@
 """commands/tm81/lora_set_dev_eui.py — Set DevEUI (CMD 0x0F)
-import logging
-_log = logging.getLogger(__name__)
 
 Default DevEUI dapat di-override lewat params di tm81_test.json:
     "params": {"dev_eui": "0080E1010101010A"}
 """
+
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:

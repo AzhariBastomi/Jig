@@ -1,8 +1,9 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/bl_goto_app.py — Bootloader → Lompat ke App (CMD BL 0x66)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

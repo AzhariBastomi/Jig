@@ -13,10 +13,12 @@ from tkinter import ttk
 from project import module_project
 from test_loader import (
     discover_tests, load_test,
-    load_flash_tests, load_flash_tests_named, flash_module_names,
+    flash_project_names, flash_project_label, flash_module_names,
+    load_flash_tests_named,
     load_voltage_tests,   voltage_module_names,
     load_tm81_tests,      tm81_module_names,      tm81_label,
     load_tm81_ota_tests,  tm81_ota_module_names,  tm81_ota_label,
+    load_bexa_tests,      bexa_module_names,      bexa_label,
 )
 
 
@@ -31,7 +33,7 @@ class AddTestDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("Add Test")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)   # tetap di atas parent, tapi klik luar tidak diblokir
 
         self._on_add          = on_add
         self._current_project = current_project
@@ -41,6 +43,21 @@ class AddTestDialog(tk.Toplevel):
         px = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
         py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
         self.geometry(f"+{px}+{py}")
+        # Delay sedikit agar klik tombol yang membuka dialog ini tidak langsung menutupnya
+        self.after(80, lambda: self.bind_all("<Button-1>", self._on_global_click, add="+"))
+
+    def _on_global_click(self, event):
+        """Tutup dialog saat klik di luar batas dialog."""
+        if not self.winfo_exists():
+            return
+        try:
+            cx, cy = event.x_root, event.y_root
+            dx, dy = self.winfo_rootx(), self.winfo_rooty()
+            dw, dh = self.winfo_width(), self.winfo_height()
+            if not (dx <= cx <= dx + dw and dy <= cy <= dy + dh):
+                self.destroy()
+        except Exception:
+            pass
 
     def _btn_state(self, proj: "str | None") -> str:
         if proj is None:
@@ -55,9 +72,10 @@ class AddTestDialog(tk.Toplevel):
 
         if self._current_project:
             msg = {
-                "tm81":  "Project aktif: TM81  (flash / TM81 Flash tidak bisa ditambahkan)",
-                "flash": "Project aktif: Flash  (tm81 / TM81 Flash tidak bisa ditambahkan)",
-                "ota":   "Project aktif: TM81 Flash  (tm81 / flash tidak bisa ditambahkan)",
+                "tm81":  "Project aktif: TM81  (flash / OTA / BEXA tidak bisa ditambahkan)",
+                "flash": "Project aktif: Flash  (tm81 / OTA / BEXA tidak bisa ditambahkan)",
+                "ota":   "Project aktif: TM81 OTA  (tm81 / flash / BEXA tidak bisa ditambahkan)",
+                "bexa":  "Project aktif: BEXA  (tm81 / flash / OTA tidak bisa ditambahkan)",
             }.get(self._current_project, f"Project aktif: {self._current_project}")
             tk.Label(self, text=msg, font=("TkDefaultFont", 9), fg="#888",
                      pady=4, anchor="w").grid(
@@ -91,13 +109,15 @@ class AddTestDialog(tk.Toplevel):
                       state=state, command=cmd).grid(
                 row=row_idx, column=3, padx=(6, 12), pady=3, sticky="e")
 
-        flash_names = flash_module_names()
-        if flash_names:
-            st = self._btn_state("flash")
-            labels_str = ", ".join(n.split(":")[1] for n in flash_names)
-            _row(f"Flash ({labels_str})", "progress",
-                 f"{len(flash_names)} region", st, self._add_all_flash)
-            row_idx += 1
+        for proj_name in flash_project_names():
+            names = flash_module_names(proj_name)
+            if names:
+                st  = self._btn_state("flash")
+                lbl = flash_project_label(proj_name)
+                _row(f"Flash {lbl} ({len(names)} region)", "progress",
+                     f"{len(names)} region", st,
+                     lambda p=proj_name: self._add_all_flash(p))
+                row_idx += 1
 
         volt_names = voltage_module_names()
         if volt_names:
@@ -123,6 +143,15 @@ class AddTestDialog(tk.Toplevel):
                  f"{len(tm81_ota_names)} step", st, self._add_all_tm81_ota)
             row_idx += 1
 
+        # BEXA — via Bluetooth SPP
+        bexa_names = bexa_module_names()
+        if bexa_names:
+            st  = self._btn_state("bexa")
+            lbl = bexa_label()
+            _row(f"{lbl} ({len(bexa_names)} test)", "auto",
+                 f"{len(bexa_names)} entry", st, self._add_all_bexa)
+            row_idx += 1
+
         for name, label, mod in self._modules:
             mod_proj = module_project(name)
             st       = self._btn_state(mod_proj)
@@ -139,19 +168,29 @@ class AddTestDialog(tk.Toplevel):
 
     def _add(self, module_name: str):
         self._on_add(load_test(module_name), module_name)
+        self.destroy()
 
-    def _add_all_flash(self):
-        for item, name in load_flash_tests_named():
+    def _add_all_flash(self, proj_name: str):
+        for item, name in load_flash_tests_named(proj_name):
             self._on_add(item, name)
+        self.destroy()
 
     def _add_all_voltage(self):
         for item, name in zip(load_voltage_tests(), voltage_module_names()):
             self._on_add(item, name)
+        self.destroy()
 
     def _add_all_tm81(self):
         for item, name in zip(load_tm81_tests(), tm81_module_names()):
             self._on_add(item, name)
+        self.destroy()
 
     def _add_all_tm81_ota(self):
         for item, name in zip(load_tm81_ota_tests(), tm81_ota_module_names()):
             self._on_add(item, name)
+        self.destroy()
+
+    def _add_all_bexa(self):
+        for item, name in zip(load_bexa_tests(), bexa_module_names()):
+            self._on_add(item, name)
+        self.destroy()

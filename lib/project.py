@@ -9,6 +9,7 @@ _PROJECT_PREFIXES: dict[str, list[str]] = {
     "tm81":  ["tm81:"],
     "flash": ["flash:"],
     "ota":   ["tm81_ota:"],
+    "bexa":  ["bexa:"],
 }
 _PROJECT_SINGLES: dict[str, list[str]] = {}
 

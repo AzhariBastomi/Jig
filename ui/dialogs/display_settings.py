@@ -20,7 +20,7 @@ class DisplaySettingsDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("Display Settings")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)
 
         self._on_apply   = on_apply
         self._preset_var = tk.StringVar(value=current_preset)
@@ -33,6 +33,19 @@ class DisplaySettingsDialog(tk.Toplevel):
         px = parent.winfo_rootx() + parent.winfo_width() // 2 - self.winfo_width() // 2
         py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
         self.geometry(f"+{px}+{py}")
+        self.after(80, lambda: self.bind_all("<Button-1>", self._on_global_click, add="+"))
+
+    def _on_global_click(self, event):
+        if not self.winfo_exists():
+            return
+        try:
+            cx, cy = event.x_root, event.y_root
+            dx, dy = self.winfo_rootx(), self.winfo_rooty()
+            dw, dh = self.winfo_width(), self.winfo_height()
+            if not (dx <= cx <= dx + dw and dy <= cy <= dy + dh):
+                self.destroy()
+        except Exception:
+            pass
 
     def _build(self):
         tk.Label(self, text="Display Preset",

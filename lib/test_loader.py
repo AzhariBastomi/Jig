@@ -72,10 +72,11 @@ _VOLTAGE_JSON       = os.path.join(_ROOT, "config", "voltage.json")
 _TM81_JSON          = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_test.json")
 _TM81_OTA_JSON      = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_ota.json")
 _COMMISSIONING_JSON = os.path.join(_ROOT, "commands", "tm81", "config", "commissioning.json")
+_BEXA_JSON          = os.path.join(_ROOT, "commands", "bexa",  "config", "bexa_test.json")
 
 
 # ---------------------------------------------------------------------------
-# Flash helpers
+# Flash helpers  (multi-project: flash.json["projects"])
 # ---------------------------------------------------------------------------
 
 def _read_flash_json() -> dict:
@@ -87,36 +88,20 @@ def _read_flash_json() -> dict:
         return {}
 
 
-def _make_flash_item(region: dict):
-    """Buat satu ProgressBarTest untuk satu region flash."""
-    from tests.flash_test import FlashTest
+def flash_project_names() -> list[str]:
+    """Return list nama project flash, misal ['tm81', 'bexa']."""
+    return list(_read_flash_json().get("projects", {}).keys())
 
-    name      = region.get("name", "unknown")
-    base_desc = region.get("description", f"Flash region '{name}'")
 
-    # Baca file & address langsung dari flash.json (single source of truth)
-    fw_file  = region.get("file", "").strip()
-    address  = region.get("address", "0x08000000").strip()
-    fw_label = os.path.basename(fw_file) if fw_file else "⚠ file belum diset"
-    desc     = f"{base_desc}  •  {fw_label}  @  {address}"
+def flash_project_label(proj_name: str) -> str:
+    """Return label tampilan untuk project flash, misal 'TM81' atau 'BEXA'."""
+    proj = _read_flash_json().get("projects", {}).get(proj_name, {})
+    return proj.get("label", proj_name.upper())
 
-    # Buat subclass anonim agar setiap instance punya REGION sendiri
-    cls      = type(f"_FlashTest_{name}", (FlashTest,), {
-        "TITLE":       f"Flash {name}",
-        "COMMAND":     f"FLASH_{name.upper()}",
-        "DESCRIPTION": desc,
-        "REGION":      region,
-    })
-    instance = cls()
 
-    return ProgressBarTest(
-        title       = f"Flash {name}",
-        command     = f"FLASH_{name.upper()}",
-        description = desc,
-        run_fn      = instance.run,
-        steps       = getattr(cls, "STEPS",   10),
-        step_ms     = getattr(cls, "STEP_MS", 300),
-    )
+def _get_flash_regions(proj_name: str) -> list:
+    """Return list region untuk project tertentu."""
+    return _read_flash_json().get("projects", {}).get(proj_name, {}).get("regions", [])
 
 
 def _region_active(r: dict) -> bool:
@@ -126,33 +111,53 @@ def _region_active(r: dict) -> bool:
     return True
 
 
-def load_flash_tests() -> list:
-    """
-    Baca flash.json dan kembalikan list TestItem.
-    Region optional yang file-nya kosong diabaikan.
-    Region wajib (boot, app) selalu muncul.
-    """
-    cfg = _read_flash_json()
-    return [_make_flash_item(r) for r in cfg.get("regions", [])
-            if _region_active(r)]
+def _make_flash_item(region: dict, proj_name: str = ""):
+    """Buat satu ProgressBarTest untuk satu region flash."""
+    from tests.flash_test import FlashTest
+
+    name      = region.get("name", "unknown")
+    base_desc = region.get("description", f"Flash region '{name}'")
+    fw_file   = region.get("file", "").strip()
+    address   = region.get("address", "0x08000000").strip()
+    fw_label  = os.path.basename(fw_file) if fw_file else "⚠ file belum diset"
+    desc      = f"{base_desc}  •  {fw_label}  @  {address}"
+    cmd_tag   = f"{proj_name.upper()}_{name.upper()}" if proj_name else name.upper()
+
+    cls      = type(f"_FlashTest_{proj_name}_{name}", (FlashTest,), {
+        "TITLE":       f"Flash {name}",
+        "COMMAND":     f"FLASH_{cmd_tag}",
+        "DESCRIPTION": desc,
+        "REGION":      region,
+    })
+    instance = cls()
+
+    return ProgressBarTest(
+        title       = f"Flash {name}",
+        command     = f"FLASH_{cmd_tag}",
+        description = desc,
+        run_fn      = instance.run,
+        steps       = getattr(cls, "STEPS",   10),
+        step_ms     = getattr(cls, "STEP_MS", 300),
+    )
 
 
-def flash_module_names() -> list[str]:
-    """Kembalikan ["flash:boot", "flash:app", ...] untuk SEMUA region (termasuk yang belum dikonfigurasi).
-    Dipakai untuk tampilan di Add Test dialog. Gunakan load_flash_tests_named() untuk yang sudah dikonfigurasi."""
-    cfg = _read_flash_json()
-    return [f"flash:{r['name']}" for r in cfg.get("regions", [])]
+def flash_module_names(proj_name: str) -> list[str]:
+    """Return ['flash:tm81:boot', 'flash:tm81:app'] untuk semua region project (termasuk belum dikonfigurasi)."""
+    return [f"flash:{proj_name}:{r['name']}" for r in _get_flash_regions(proj_name)]
 
 
-def load_flash_tests_named() -> list[tuple]:
-    """Return [(TestItem, 'flash:name'), ...] sesuai aturan _region_active().
-    Dipakai oleh Add Test dialog agar pairing item↔name selalu benar."""
-    cfg = _read_flash_json()
+def load_flash_tests_named(proj_name: str) -> list[tuple]:
+    """Return [(TestItem, 'flash:proj:name'), ...] hanya region yang aktif (_region_active)."""
     return [
-        (_make_flash_item(r), f"flash:{r['name']}")
-        for r in cfg.get("regions", [])
+        (_make_flash_item(r, proj_name), f"flash:{proj_name}:{r['name']}")
+        for r in _get_flash_regions(proj_name)
         if _region_active(r)
     ]
+
+
+def load_flash_tests(proj_name: str) -> list:
+    """Return list TestItem untuk project flash tertentu (region aktif saja)."""
+    return [item for item, _ in load_flash_tests_named(proj_name)]
 
 
 # ---------------------------------------------------------------------------
@@ -370,11 +375,26 @@ class _TM81FlashStep(TestBase):
         p = dict(self._params)
         if self._progress_cb:
             p["progress_cb"] = self.report_progress
+
+        # Pause keepalive ping selama step OTA berlangsung agar tidak interferensi
+        # dengan komunikasi bootloader di serial port yang sama.
+        try:
+            from controllers.keepalive import pause_global, resume_global
+            _ka_available = True
+        except ImportError:
+            _ka_available = False
+
+        if _ka_available:
+            pause_global()
         try:
             result = self._cmd_cls(conn=self._conn, params=p).execute()
         except Exception as e:
             _log.exception("TM81 Flash step exception:")
             return f"NG:{e}"
+        finally:
+            if _ka_available:
+                resume_global()
+
         if result == "OK" and self._post_wait > 0:
             _t.sleep(self._post_wait)
         return result
@@ -405,8 +425,24 @@ def _make_tm81_ota_item(entry: dict, cfg: dict):
     fw_dir     = os.path.join(_ROOT, flash_cfg.get("flash_dir", "firmware"))
 
     # fw_version dari tm81_ota.json (user-configurable)
+    # Bisa berupa full absolute path (dari OTA Settings dialog) atau nama file relatif ke fw_dir
     fw_version = cfg.get("fw_version", "")
-    fw_path    = os.path.join(fw_dir, fw_version) if fw_version else ""
+    if not fw_version:
+        fw_path = ""
+    elif os.path.isabs(fw_version):
+        fw_path = fw_version
+    else:
+        fw_path = os.path.join(fw_dir, fw_version)
+
+    # Untuk step Write Firmware: tambahkan info file ke description
+    if "BLWriteFirmware" in class_path or name == "write_fw":
+        if not fw_path:
+            desc += "\n⚠ Belum ada firmware — buka OTA Settings untuk pilih file"
+        elif not os.path.isfile(fw_path):
+            desc += f"\n⚠ File tidak ditemukan: {os.path.basename(fw_path)}"
+        else:
+            size_kb = os.path.getsize(fw_path) / 1024
+            desc += f"\nFile: {os.path.basename(fw_path)} ({size_kb:.1f} KB)"
 
     # Params: fw config (base) + entry["params"] (override, misal skip_set_rdy)
     params = {"fw_path": fw_path, "chunk_size": chunk_size, "fill_with_ff": fill_ff}
@@ -468,6 +504,87 @@ def tm81_ota_label() -> str:
 
 
 # ---------------------------------------------------------------------------
+# BEXA helpers
+# ---------------------------------------------------------------------------
+
+def _read_bexa_json() -> dict:
+    """Baca bexa_test.json. Return {} jika tidak ada."""
+    try:
+        with open(_BEXA_JSON, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _bexa_enabled(entry: dict) -> bool:
+    return "name" in entry and not entry.get("disabled", False)
+
+
+def _make_bexa_item(entry: dict):
+    """Buat AutoTest atau ManualTest untuk satu entry di bexa_test.json."""
+    import importlib as _imp
+    import sys as _sys
+
+    name      = entry.get("name", "unknown")
+    label     = entry.get("label", name)
+    desc      = entry.get("description", "")
+    cls_path  = entry.get("command_class", "")
+    ttype     = entry.get("type", "auto").lower()
+
+    _cmd_cls  = None
+    _load_err = ""
+    if cls_path:
+        try:
+            if _ROOT not in _sys.path:
+                _sys.path.insert(0, _ROOT)
+            mod_path, cls_name = cls_path.rsplit(".", 1)
+            mod      = _imp.import_module(mod_path)
+            _cmd_cls = getattr(mod, cls_name)
+        except Exception as e:
+            _load_err = str(e)
+
+    def _run_fn():
+        if _cmd_cls is None:
+            return f"NG:{_load_err or 'command_class tidak diset'}"
+        try:
+            _log.info("[BEXA] %s", label)
+            return _cmd_cls().execute()
+        except Exception as e:
+            _log.exception("[BEXA] %s exception:", label)
+            return f"NG:{e}"
+
+    kw = dict(title=label, command=f"BEXA_{name.upper()}",
+              description=desc, run_fn=_run_fn,
+              no_retry=entry.get("no_retry", False))
+
+    if ttype == "manual":
+        return ManualTest(**kw)
+    else:
+        return AutoTest(**kw)
+
+
+def load_bexa_tests() -> list:
+    """Baca bexa_test.json dan kembalikan list TestItem."""
+    cfg = _read_bexa_json()
+    return [_make_bexa_item(e) for e in cfg.get("tests", []) if _bexa_enabled(e)]
+
+
+def bexa_module_names() -> list[str]:
+    """Kembalikan ['bexa:config_request', 'bexa:get_bt_info', ...] sesuai urutan."""
+    cfg = _read_bexa_json()
+    return [f"bexa:{e['name']}" for e in cfg.get("tests", []) if _bexa_enabled(e)]
+
+
+def bexa_label() -> str:
+    """Derive label dari field 'label' di bexa_test.json."""
+    cfg = _read_bexa_json()
+    if cfg.get("label"):
+        return cfg["label"]
+    stem = os.path.splitext(os.path.basename(_BEXA_JSON))[0]
+    return stem.replace("_", " ").title()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -518,7 +635,7 @@ def discover_tests():
     """
     results = []
     for finder, name, _ in pkgutil.iter_modules(tests.__path__):
-        if name in ("flash_test", "voltage_test", "tm81_test", "crc_comm_test"):
+        if name in ("flash_test", "voltage_test", "tm81_test", "bexa_test", "crc_comm_test"):
             continue
         mod = importlib.import_module(f"tests.{name}")
         cls = _find_test_class(mod)
@@ -557,12 +674,16 @@ def load_test(module_name: str):
         raise KeyError(f"Voltage entry '{entry_name}' tidak ditemukan di voltage.json")
 
     if module_name.startswith("flash:"):
-        region_name = module_name[len("flash:"):]
-        cfg = _read_flash_json()
-        for r in cfg.get("regions", []):
+        # Format: "flash:proj:region", misal "flash:tm81:boot"
+        rest  = module_name[len("flash:"):]
+        parts = rest.split(":", 1)
+        if len(parts) != 2:
+            raise KeyError(f"Format module flash tidak valid: '{module_name}' (harus 'flash:proj:region')")
+        proj_name, region_name = parts
+        for r in _get_flash_regions(proj_name):
             if r.get("name") == region_name:
-                return _make_flash_item(r)
-        raise KeyError(f"Flash region '{region_name}' tidak ditemukan di flash.json")
+                return _make_flash_item(r, proj_name)
+        raise KeyError(f"Flash region '{region_name}' tidak ditemukan di project '{proj_name}'")
 
     if module_name.startswith("tm81_ota:"):
         entry_name = module_name[len("tm81_ota:"):]
@@ -571,6 +692,16 @@ def load_test(module_name: str):
             if e.get("name") == entry_name:
                 return _make_tm81_ota_item(e, cfg)
         raise KeyError(f"TM81 Flash step '{entry_name}' tidak ditemukan di tm81_ota.json")
+
+    if module_name.startswith("bexa:"):
+        entry_name = module_name[len("bexa:"):]
+        cfg = _read_bexa_json()
+        for e in cfg.get("tests", []):
+            if e.get("name") == entry_name:
+                if not _bexa_enabled(e):
+                    raise KeyError(f"BEXA test '{entry_name}' di-disabled di bexa_test.json")
+                return _make_bexa_item(e)
+        raise KeyError(f"BEXA test '{entry_name}' tidak ditemukan di bexa_test.json")
 
     # Modul biasa dari folder tests/
     mod = importlib.import_module(f"tests.{module_name}")

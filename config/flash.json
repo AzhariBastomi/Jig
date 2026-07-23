@@ -1,28 +1,47 @@
 {
   "tool": "auto",
   "flash_dir": "firmware",
-  "regions": [
-    {
-      "name": "boot",
-      "description": "Bootloader",
-      "address": "0x08000000",
-      "file": "",
-      "reset": false
+  "projects": {
+    "tm81": {
+      "label": "TM81",
+      "regions": [
+        {
+          "name": "boot",
+          "description": "Bootloader",
+          "address": "0x08000000",
+          "file": ""
+        },
+        {
+          "name": "app",
+          "description": "Application",
+          "address": "0x08040000",
+          "file": ""
+        }
+      ]
     },
-    {
-      "name": "app",
-      "description": "Application / FOTA",
-      "address": "0x08040000",
-      "file": "",
-      "reset": true
-    },
-    {
-      "name": "sn",
-      "description": "Serial Number",
-      "address": "0x08020000",
-      "file": "C:/Users/basto/Documents/GitHub/Jig/firmware/BEXA/SNv1.0.bin",
-      "reset": false,
-      "optional": false
+    "bexa": {
+      "label": "BEXA",
+      "regions": [
+        {
+          "name": "boot",
+          "description": "Bootloader",
+          "address": "0x08000000",
+          "file": ""
+        },
+        {
+          "name": "app",
+          "description": "Application",
+          "address": "0x08010000",
+          "file": ""
+        },
+        {
+          "name": "sn",
+          "description": "Serial Number",
+          "address": "0x08008000",
+          "file": "",
+          "optional": true
+        }
+      ]
     }
-  ]
+  }
 }

@@ -1,6 +1,4 @@
 """commands/tm81/user_set_config.py — Set User Config (CMD 0x07)
-import logging
-_log = logging.getLogger(__name__)
 
 Kirim:
   activation(1B) + initial_counter(4B) + counter_res(1B) +
@@ -8,6 +6,9 @@ Kirim:
 
 Defaults: activated, 0, RES_10L, 0, THIRTY_MINS, UTC+7, CONFIRMED
 """
+
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:

@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/lora_force_send.py — Force Send LoRa (CMD 0x17)
 Paksa device kirim uplink sekarang.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

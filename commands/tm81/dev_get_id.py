@@ -25,8 +25,12 @@ class DevGetId(TM81Command):
         if len(d) < 24:
             return f"NG:payload terlalu pendek ({len(d)} bytes, expected 24)"
 
-        eui = d[0:8].hex()                                          # "ffffffffffffffff"
-        sn  = d[8:24].rstrip(b"\x00").decode("ascii", errors="replace")  # "TM81123487651230"
+        eui    = d[0:8].hex()                                        # "0080e1010101016f"
+        sn_raw = d[8:24]
+        if all(b == 0xFF for b in sn_raw) or not sn_raw.strip(b"\x00"):
+            sn = "Invalid"
+        else:
+            sn = sn_raw.rstrip(b"\x00").decode("ascii", errors="replace")
 
         return f"OK:EUI={eui} SN={sn}"
 

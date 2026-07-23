@@ -52,9 +52,32 @@ class BLWriteFirmware(TM81Command):
     # Public
     # ------------------------------------------------------------------
 
+    def _resolve_fw_path(self) -> str:
+        """Jika fw_path kosong, baca dari tm81_ota.json saat runtime."""
+        if self._fw_path:
+            return self._fw_path
+        try:
+            import json as _json
+            _cfg_path = os.path.join(
+                os.path.dirname(__file__), "config", "tm81_ota.json"
+            )
+            with open(_cfg_path, encoding="utf-8") as f:
+                cfg = _json.load(f)
+            fw_ver = cfg.get("fw_version", "")
+            if fw_ver and os.path.isabs(fw_ver):
+                return fw_ver
+            fw_dir = os.path.join(
+                os.path.dirname(__file__), "..", "..", "firmware"
+            )
+            return os.path.join(fw_dir, fw_ver) if fw_ver else ""
+        except Exception:
+            return ""
+
     def execute(self) -> str:
-        if not self._fw_path or not os.path.isfile(self._fw_path):
-            return f"NG:File tidak ditemukan: {self._fw_path!r}"
+        fw_path = self._resolve_fw_path()
+        if not fw_path or not os.path.isfile(fw_path):
+            return f"NG:File tidak ditemukan: {fw_path!r}"
+        self._fw_path = fw_path  # simpan agar log benar
 
         # Baca firmware
         with open(self._fw_path, "rb") as f:
@@ -69,24 +92,45 @@ class BLWriteFirmware(TM81Command):
         _log.debug("  FW: %s", os.path.basename(self._fw_path))
         _log.debug("  Size: %d B  CRC: %s", fw_size, crc_bytes.hex(" "))
 
-        # Step 1: BL_SET_RDY — kirim fw_size + CRC (skip jika BLPrepare sudah melakukannya)
-        if not self._skip_set_rdy:
-            r = self._bl_set_rdy(fw_size, crc_bytes)
+        # ── Pause keepalive ping (safety layer ke-2) ──────────────────────────
+        # Layer pertama: _TM81FlashStep.run() di test_loader.py.
+        # Layer ini menjamin ping TIDAK masuk bahkan jika BLWriteFirmware
+        # dipanggil langsung (standalone / path lain), sekaligus menunggu
+        # ping yang sedang berjalan selesai sebelum mulai kirim ke bootloader.
+        try:
+            from controllers.keepalive import pause_global, resume_global
+            _ka = True
+        except ImportError:
+            _ka = False
+
+        if _ka:
+            pause_global()
+            _log.debug("  [BLWrite] keepalive paused")
+
+        try:
+            # Step 1: BL_SET_RDY — kirim fw_size + CRC (skip jika BLPrepare sudah melakukannya)
+            if not self._skip_set_rdy:
+                r = self._bl_set_rdy(fw_size, crc_bytes)
+                if r != "OK":
+                    return r
+                time.sleep(0.5)
+
+            # Step 2: BL_FW_DATA — kirim chunk per chunk
+            r = self._bl_send_chunks(fw_data)
             if r != "OK":
                 return r
-            time.sleep(0.5)
 
-        # Step 2: BL_FW_DATA — kirim chunk per chunk
-        r = self._bl_send_chunks(fw_data)
-        if r != "OK":
-            return r
+            # Step 3: BL_GOTO_APP (skip jika BLGotoApp dipanggil terpisah)
+            if not self._skip_goto_app:
+                r = self._bl_goto_app()
+                return r
 
-        # Step 3: BL_GOTO_APP (skip jika BLGotoApp dipanggil terpisah)
-        if not self._skip_goto_app:
-            r = self._bl_goto_app()
-            return r
+            return "OK"
 
-        return "OK"
+        finally:
+            if _ka:
+                resume_global()
+                _log.debug("  [BLWrite] keepalive resumed")
 
     # ------------------------------------------------------------------
     # Internal steps

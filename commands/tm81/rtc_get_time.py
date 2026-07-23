@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/rtc_get_time.py - Get RTC Time (CMD 0x0A)
 Response payload (6 bytes): year(2digit), month, day, hour, minute, second.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

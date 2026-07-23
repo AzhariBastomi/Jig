@@ -1,8 +1,9 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/user_get_config.py - Get User Config (CMD 0x08)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

@@ -27,10 +27,11 @@
       },
       "bluetooth": {
         "baudrate": 921600,
-        "timeout": 2.0,
-        "description": "Bluetooth Serial Port",
+        "timeout": 5.0,
+        "description": "BEXA — Bluetooth Classic SPP (pasangkan dulu, COM muncul otomatis)",
         "port_windows": "COM4",
-        "port_linux": "/dev/rfcomm0"
+        "port_linux": "/dev/rfcomm0",
+        "parser": "raw"
       }
     },
     "default": "uart"
@@ -45,7 +46,8 @@
     "_doc": "Ping TM81 secara periodik agar device tidak masuk mode sleep",
     "enabled": true,
     "interval_ms": 5000,
-    "connection": "ch340"
+    "connection": "ch340",
+    "log_tx_rx": false
   },
 
   "database": {

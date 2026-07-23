@@ -23,13 +23,14 @@ class OTASettingsDialog(tk.Toplevel):
     _OTA_JSON   = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_ota.json")
     _FLASH_JSON = os.path.join(_ROOT, "config", "flash.json")
 
-    def __init__(self, parent):
+    def __init__(self, parent, on_save=None):
         super().__init__(parent)
         self.title("OTA Settings")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)
         self.configure(bg=COLORS["bg"])
 
+        self._on_save_cb = on_save
         self._ota_data   = self._load(self._OTA_JSON)
         self._flash_data = self._load(self._FLASH_JSON)
         self._fw_var     = tk.StringVar(value=self._ota_data.get("fw_version", ""))
@@ -39,6 +40,20 @@ class OTASettingsDialog(tk.Toplevel):
         x = parent.winfo_rootx() + (parent.winfo_width()  - self.winfo_width())  // 2
         y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 2
         self.geometry(f"+{x}+{y}")
+        self._suppress_close = False
+        self.after(80, lambda: self.bind_all("<Button-1>", self._on_global_click, add="+"))
+
+    def _on_global_click(self, event):
+        if not self.winfo_exists() or self._suppress_close:
+            return
+        try:
+            cx, cy = event.x_root, event.y_root
+            dx, dy = self.winfo_rootx(), self.winfo_rooty()
+            dw, dh = self.winfo_width(), self.winfo_height()
+            if not (dx <= cx <= dx + dw and dy <= cy <= dy + dh):
+                self.destroy()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ I/O
 
@@ -77,23 +92,36 @@ class OTASettingsDialog(tk.Toplevel):
         # File
         tk.Label(card, text="File:", bg=C["card"], fg=C["text"],
                  ).grid(row=1, column=0, sticky="w", padx=8, pady=2)
-        tk.Entry(card, textvariable=self._fw_var, width=36,
-                 bg=C["surface"], fg=C["text"], relief="flat",
-                 insertbackground=C["text"],
-                 highlightthickness=1, highlightbackground=C["border"],
-                 highlightcolor=C["running"],
-                 ).grid(row=1, column=1, padx=4, pady=2)
+        fw_entry = tk.Entry(card, textvariable=self._fw_var, width=42,
+                            bg=C["surface"], fg=C["text"], relief="flat",
+                            insertbackground=C["text"],
+                            highlightthickness=1, highlightbackground=C["border"],
+                            highlightcolor=C["running"],
+                            state="readonly",
+                            )
+        fw_entry.grid(row=1, column=1, padx=4, pady=2)
+        # Scroll ke akhir agar nama file terlihat
+        self._fw_var.trace_add("write", lambda *_: fw_entry.xview_moveto(1.0))
 
         def _browse():
             from tkinter import filedialog
-            fw_dir = os.path.join(_ROOT, self._flash_data.get("flash_dir", "firmware"))
+            self._suppress_close = True
+            # Prioritas init_dir: (1) folder file yang sudah dipilih, (2) flash_dir, (3) root
+            cur = self._fw_var.get().strip()
+            if cur and os.path.isabs(cur) and os.path.isdir(os.path.dirname(cur)):
+                init_dir = os.path.dirname(cur)
+            else:
+                fw_dir   = os.path.join(_ROOT, self._flash_data.get("flash_dir", "firmware"))
+                init_dir = fw_dir if os.path.isdir(fw_dir) else _ROOT
             path = filedialog.askopenfilename(
                 parent=self, title="Pilih firmware OTA",
                 filetypes=[("Binary", "*.bin"), ("All", "*.*")],
-                initialdir=fw_dir if os.path.isdir(fw_dir) else _ROOT,
+                initialdir=init_dir,
             )
             if path:
-                self._fw_var.set(os.path.basename(path))
+                # Simpan full absolute path agar test_loader bisa langsung pakai
+                self._fw_var.set(os.path.normpath(os.path.abspath(path)))
+            self.after(300, lambda: setattr(self, '_suppress_close', False))
 
         tk.Button(card, text="Browse", command=_browse,
                   bg=C["border"], fg=C["text"], relief="flat", cursor="hand2",
@@ -119,5 +147,7 @@ class OTASettingsDialog(tk.Toplevel):
         try:
             self._save()
             self.destroy()
+            if self._on_save_cb:
+                self._on_save_cb()
         except Exception as e:
             messagebox.showerror("Gagal simpan", str(e), parent=self)

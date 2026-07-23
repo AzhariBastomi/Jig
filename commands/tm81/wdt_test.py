@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/wdt_test.py — Test Watchdog Timer (CMD 0x0D)
 Device akan reset via WDT setelah command ini → koneksi putus adalah hasil normal.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

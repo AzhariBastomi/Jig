@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/app_goto_bl.py — Reboot ke Bootloader (CMD 0x05)
 Kirim dari App mode → masuk Bootloader mode (untuk OTA IrDA).
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

@@ -15,28 +15,50 @@ from config import COLORS
 
 class FlashSettingsDialog(tk.Toplevel):
     """
-    Dialog untuk mengatur file firmware dan alamat flash per region.
-    Baca dan tulis langsung ke config/flash.json.
+    Dialog untuk memilih file firmware per region.
+    Hanya menampilkan field 'file' — address diatur langsung di flash.json.
+    Detect flash project dari module names yang aktif (flash:proj:region).
+    Browse mengingat direktori terakhir per region.
     """
 
     _FLASH_JSON = os.path.join(_ROOT, "config", "flash.json")
 
-    def __init__(self, parent):
+    def __init__(self, parent, flash_project: str = None, on_save=None):
         super().__init__(parent)
         self.title("Flash Settings")
         self.resizable(False, False)
-        self.grab_set()
+        self.transient(parent)
         self.configure(bg=COLORS["bg"])
 
+        self._proj_name  = flash_project or ""
+        self._on_save_cb = on_save
         self._flash_data = self._load()
-        self._regions    = self._flash_data.get("regions", [])
-        self._entries    = {}   # {region_name: {"file": StringVar, "address": StringVar}}
+        self._regions    = (
+            self._flash_data.get("projects", {})
+                            .get(self._proj_name, {})
+                            .get("regions", [])
+        )
+        self._entries = {}   # {region_name: StringVar(file)}
 
         self._build()
         self.update_idletasks()
         x = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
         y = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
         self.geometry(f"+{x}+{y}")
+        self._suppress_close = False
+        self.after(80, lambda: self.bind_all("<Button-1>", self._on_global_click, add="+"))
+
+    def _on_global_click(self, event):
+        if not self.winfo_exists() or self._suppress_close:
+            return
+        try:
+            cx, cy = event.x_root, event.y_root
+            dx, dy = self.winfo_rootx(), self.winfo_rooty()
+            dw, dh = self.winfo_width(), self.winfo_height()
+            if not (dx <= cx <= dx + dw and dy <= cy <= dy + dh):
+                self.destroy()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ I/O
 
@@ -47,9 +69,20 @@ class FlashSettingsDialog(tk.Toplevel):
         except Exception:
             return {}
 
-    def _save(self, data: dict):
+    def _save(self):
+        # Update file per region di project yang aktif
+        regions = (
+            self._flash_data.setdefault("projects", {})
+                            .setdefault(self._proj_name, {})
+                            .setdefault("regions", [])
+        )
+        for region in regions:
+            name = region.get("name", "")
+            if name in self._entries:
+                region["file"] = self._entries[name].get().strip()
+
         with open(self._FLASH_JSON, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(self._flash_data, f, indent=2, ensure_ascii=False)
 
     # ------------------------------------------------------------------ UI
 
@@ -57,26 +90,31 @@ class FlashSettingsDialog(tk.Toplevel):
         C   = COLORS
         pad = {"padx": 12, "pady": 6}
 
-        tk.Label(self, text="Flash Settings",
+        proj_label = (
+            self._flash_data.get("projects", {})
+                            .get(self._proj_name, {})
+                            .get("label", self._proj_name.upper())
+        )
+        tk.Label(self, text=f"Flash Settings — {proj_label}",
                  bg=C["bg"], fg=C["text"],
                  font=("TkDefaultFont", 11, "bold")).pack(**pad)
         tk.Frame(self, height=1, bg=C["border"]).pack(fill="x", padx=12)
 
         if not self._regions:
-            tk.Label(self, text="Tidak ada region di flash.json",
+            tk.Label(self, text="Tidak ada region untuk project ini.",
                      bg=C["bg"], fg=C.get("error", "red")).pack(**pad)
             tk.Button(self, text="Tutup", command=self.destroy).pack(pady=8)
             return
 
+        flash_dir = os.path.join(_ROOT, self._flash_data.get("flash_dir", "firmware"))
+
         for region in self._regions:
             name     = region.get("name", "unknown")
             label    = region.get("description", name)
-            def_file = region.get("file", "")
-            def_addr = region.get("address", "0x08000000")
+            cur_file = region.get("file", "").strip()
 
-            file_var = tk.StringVar(value=def_file)
-            addr_var = tk.StringVar(value=def_addr)
-            self._entries[name] = {"file": file_var, "address": addr_var}
+            file_var = tk.StringVar(value=cur_file)
+            self._entries[name] = file_var
 
             card = tk.Frame(self, bg=C["card"],
                             highlightthickness=1, highlightbackground=C["border"])
@@ -87,40 +125,39 @@ class FlashSettingsDialog(tk.Toplevel):
                      font=("TkDefaultFont", 9, "bold"),
                      ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 2))
 
-            # File
             tk.Label(card, text="File:", bg=C["card"], fg=C["text"],
-                     ).grid(row=1, column=0, sticky="w", padx=8, pady=2)
+                     ).grid(row=1, column=0, sticky="w", padx=8, pady=(2, 8))
             tk.Entry(card, textvariable=file_var, width=36,
                      bg=C["surface"], fg=C["text"], relief="flat",
                      insertbackground=C["text"],
                      highlightthickness=1, highlightbackground=C["border"],
                      highlightcolor=C["running"],
-                     ).grid(row=1, column=1, padx=4, pady=2)
+                     ).grid(row=1, column=1, padx=4, pady=(2, 8))
 
             def _browse(var=file_var):
                 from tkinter import filedialog
-                flash_dir = os.path.join(_ROOT, self._flash_data.get("flash_dir", "firmware"))
+                # Suppress auto-close selama filedialog terbuka
+                self._suppress_close = True
+                cur = var.get().strip()
+                if cur and os.path.isabs(cur) and os.path.isdir(os.path.dirname(cur)):
+                    init_dir = os.path.dirname(cur)
+                elif cur and os.path.isdir(os.path.join(flash_dir, os.path.dirname(cur))):
+                    init_dir = os.path.join(flash_dir, os.path.dirname(cur))
+                else:
+                    init_dir = flash_dir if os.path.isdir(flash_dir) else _ROOT
                 path = filedialog.askopenfilename(
                     parent=self, title="Pilih firmware",
                     filetypes=[("Binary", "*.bin *.hex"), ("All", "*.*")],
-                    initialdir=flash_dir if os.path.isdir(flash_dir) else _ROOT,
+                    initialdir=init_dir,
                 )
                 if path:
                     var.set(path)
+                # Resume auto-close setelah delay singkat
+                self.after(300, lambda: setattr(self, '_suppress_close', False))
 
             tk.Button(card, text="Browse", command=_browse,
                       bg=C["border"], fg=C["text"], relief="flat", cursor="hand2",
-                      ).grid(row=1, column=2, padx=(0, 8), pady=2)
-
-            # Address
-            tk.Label(card, text="Address:", bg=C["card"], fg=C["text"],
-                     ).grid(row=2, column=0, sticky="w", padx=8, pady=(2, 6))
-            tk.Entry(card, textvariable=addr_var, width=16,
-                     bg=C["surface"], fg=C["text"], font=("Courier", 9),
-                     relief="flat", insertbackground=C["text"],
-                     highlightthickness=1, highlightbackground=C["border"],
-                     highlightcolor=C["running"],
-                     ).grid(row=2, column=1, sticky="w", padx=4, pady=(2, 6))
+                      ).grid(row=1, column=2, padx=(0, 8), pady=(2, 8))
 
         # Buttons
         tk.Frame(self, height=1, bg=C["border"]).pack(fill="x", padx=12, pady=(8, 0))
@@ -135,25 +172,10 @@ class FlashSettingsDialog(tk.Toplevel):
                   width=8, cursor="hand2").pack(side="right")
 
     def _on_save(self):
-        # Validasi address
-        for name, vars_ in self._entries.items():
-            addr_val = vars_["address"].get().strip()
-            if addr_val and not addr_val.startswith("0x"):
-                messagebox.showerror(
-                    "Format salah",
-                    f"Region '{name}': Address harus diawali 0x (contoh: 0x08000000)",
-                    parent=self)
-                return
-
-        # Update file & address langsung ke flash_data["regions"]
-        for region in self._flash_data.get("regions", []):
-            name = region.get("name", "")
-            if name in self._entries:
-                region["file"]    = self._entries[name]["file"].get().strip()
-                region["address"] = self._entries[name]["address"].get().strip()
-
         try:
-            self._save(self._flash_data)
+            self._save()
+            if self._on_save_cb:
+                self._on_save_cb()
             self.destroy()
         except Exception as e:
             messagebox.showerror("Gagal simpan", str(e), parent=self)

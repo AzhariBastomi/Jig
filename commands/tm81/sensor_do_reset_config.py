@@ -1,8 +1,9 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/sensor_do_reset_config.py — Sensor Reset Config (CMD 0x03)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

@@ -1,9 +1,10 @@
 """commands/tm81/lora_set_join_mode.py — Set LoRa Join Mode (CMD 0x14)
-import logging
-_log = logging.getLogger(__name__)
 
 join_mode: 0=None, 1=ABP, 2=OTAA
 """
+
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:

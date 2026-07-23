@@ -31,7 +31,7 @@ class LoraGetLastSubmitTime(TM81Command):
         dt_str  = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         self._ts = ts
         _log.debug(f"  Last Submit Time: {dt_str} (unix={ts})")
-        return "OK"
+        return f"OK:{dt_str} (unix={ts})"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

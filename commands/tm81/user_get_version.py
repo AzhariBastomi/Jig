@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/user_get_version.py - Get Firmware Version (CMD 0x0C)
 Response payload (6 bytes): major, minor, patch, bl_major, bl_minor, bl_patch.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

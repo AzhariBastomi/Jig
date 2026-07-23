@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/lora_get_config.py — Get LoRaWAN Config (CMD 0x16)
 Response payload (57 bytes): full LoRaWAN configuration.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId
@@ -45,7 +46,21 @@ class LoraGetConfig(TM81Command):
         self._config = config
         for k, v in config.items():
             _log.debug(f"  {k}: {v}")
-        return "OK"
+
+        summary = f"Class {config['lora_class']} | {config['join_mode']} | DR{config['data_rate']} | TxPwr {config['tx_power']}"
+        detail = "\n".join([
+            f"Class      : {config['lora_class']}",
+            f"Join Mode  : {config['join_mode']}",
+            f"DevAddr    : {config['dev_addr']}",
+            f"DevEUI     : {config['dev_eui']}",
+            f"JoinEUI    : {config['join_eui']}",
+            f"AppKey     : {config['app_key']}",
+            f"NwkKey     : {config['nwk_key']}",
+            f"TX Power   : {config['tx_power']}",
+            f"Data Rate  : {config['data_rate']}",
+            f"RX1 Delay  : {config['rx1_delay']}",
+        ])
+        return f"OK:{summary}\n{detail}"
 
     def get_config(self) -> dict:
         return getattr(self, "_config", {})

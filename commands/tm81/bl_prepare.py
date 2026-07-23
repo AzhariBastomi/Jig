@@ -1,6 +1,4 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/bl_prepare.py — Persiapan Bootloader sebelum transfer firmware (BL_SET_RDY)
 
 Step 2 dari OTA Flash sequence:
@@ -14,6 +12,9 @@ Params (dari test_loader / params dict):
 
 Referensi: tm81-command-tester/Src/BLPrepare.py
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 import logging
 import os

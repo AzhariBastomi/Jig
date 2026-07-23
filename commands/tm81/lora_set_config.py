@@ -1,9 +1,10 @@
 """commands/tm81/lora_set_config.py — Set LoRa Config (CMD 0x1D)
-import logging
-_log = logging.getLogger(__name__)
 
 Kirim: tx_power(1B) + data_rate(1B) + rx1_delay_sec(1B)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 try:
     from commands.tm81.base import TM81Command, CmdId
 except ImportError:

@@ -1,9 +1,10 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/sensor_do_get_config.py — Sensor Get Config trigger (CMD 0x02)
 Perintah device untuk menjalankan satu siklus sensor.
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

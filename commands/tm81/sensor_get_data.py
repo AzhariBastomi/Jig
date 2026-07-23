@@ -1,8 +1,9 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/sensor_get_data.py - Get Sensor Data (CMD 0x04)
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

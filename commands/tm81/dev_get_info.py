@@ -1,6 +1,4 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/dev_get_info.py — Get Device Info (CMD 0x1A)
 Response payload (20 bytes):
   [0]    Sensor Intensity
@@ -17,6 +15,9 @@ Response payload (20 bytes):
   [18]   Is Ever Joined
   [19]   Is Last Uplink Success
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId
@@ -62,7 +63,25 @@ class DevGetInfo(TM81Command):
         for k, v in info.items():
             _log.debug(f"  {k}: {v}")
 
-        return "OK"
+        # Baris pertama = summary singkat (tampil di row UI)
+        joined_str = "Yes" if info["ever_joined"] else "No"
+        ul_str     = "Yes" if info["last_uplink_success"] else "No"
+        summary = (
+            f"Bat: {info['battery_pct']}% | "
+            f"RSSI: {info['last_dl_rssi_dbm']} dBm | "
+            f"Joined: {joined_str}"
+        )
+
+        # Detail (tampil saat di-klik)
+        detail = "\n".join([
+            f"Sensor     : intensity={info['sensor_intensity']}  indication={info['sensor_indication']}",
+            f"Battery    : {info['battery_pct']}%  |  remaining={info['battery_remaining_mah']} mAh  |  usage={info['battery_usage_mah']} mAh  |  impedance={info['battery_impedance_mohm']} mOhm",
+            f"LoRa net   : {info['lorawan_network_id']}",
+            f"LoRa RSSI  : {info['last_dl_rssi_dbm']} dBm  SNR: {info['last_dl_snr_db']} dB",
+            f"Join sess  : {info['in_join_session']}  |  ever_joined: {info['ever_joined']}  |  last_uplink_ok: {info['last_uplink_success']}",
+        ])
+
+        return f"OK:{summary}\n{detail}"
 
     def get_info(self) -> dict:
         """Return dict info setelah execute() dipanggil."""

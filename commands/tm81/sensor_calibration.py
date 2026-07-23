@@ -1,10 +1,11 @@
 """
-import logging
-_log = logging.getLogger(__name__)
 commands/tm81/sensor_calibration.py - Sensor Calibration (CMD 0x02 + 0x04)
 Loop: get_config -> get_data -> cek status bit -> konfirmasi operator.
 Tipe: MANUAL (operator confirm saat calibration done).
 """
+
+import logging
+_log = logging.getLogger(__name__)
 
 try:
     from commands.tm81.base import TM81Command, CmdId

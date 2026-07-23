@@ -340,7 +340,12 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     def _auto_connect(self):
-        """Scan semua koneksi dari config.json, coba connect tiap-tiap port."""
+        """Scan semua koneksi dari config.json, coba connect tiap-tiap port.
+        Dipanggil sekali saat startup, lalu di-reschedule tiap 5 detik
+        selama masih ada koneksi yang belum terhubung.
+        """
+        _RETRY_MS = 5_000
+
         def _do():
             import serial_manager as sm
             import serial.tools.list_ports as lp
@@ -359,7 +364,11 @@ class App(tk.Tk):
                         return p.device
                 return ""
 
+            any_failed = False
             for name, cfg in sm._CONN_DEFS.items():
+                # Skip koneksi yang sudah tersambung
+                if sm.is_connected(name):
+                    continue
                 dev_name = cfg.get("device_name", "")
                 found    = find_port(dev_name)
                 ok = False
@@ -371,6 +380,12 @@ class App(tk.Tk):
                 status = f"OK [{found}]" if ok else f"NG (cari: {dev_name!r})"
                 self.after(0, lambda n=name, s=status:
                     log.info("[serial] %s: %s", n, s))
+                if not ok:
+                    any_failed = True
+
+            # Retry otomatis selama ada yang belum terhubung
+            if any_failed:
+                self.after(_RETRY_MS, self._auto_connect)
 
         threading.Thread(target=_do, daemon=True).start()
 
@@ -577,12 +592,51 @@ class App(tk.Tk):
     def _open_commissioning(self):
         CommissioningDialog(self)
 
+    def _get_active_flash_project(self) -> str:
+        """Deteksi flash project aktif dari test names (format 'flash:proj:region')."""
+        for name in self._test_names:
+            if name.startswith("flash:"):
+                parts = name[len("flash:"):].split(":", 1)
+                if len(parts) == 2:
+                    return parts[0]
+        return ""
+
     def _open_flash_settings(self):
-        FlashSettingsDialog(self)
+        FlashSettingsDialog(self,
+                            flash_project=self._get_active_flash_project(),
+                            on_save=self._reload_flash_tests)
+
+    def _reload_flash_tests(self):
+        """Reload semua flash: test items dari flash.json setelah Flash Settings disimpan."""
+        from test_loader import load_test
+        changed = False
+        for i, name in enumerate(self._test_names):
+            if name.startswith("flash:"):
+                try:
+                    self._tests[i] = load_test(name)
+                    changed = True
+                except Exception:
+                    pass
+        if changed:
+            self._list_panel.load_tests(self._tests)
 
     def _open_ota_settings(self):
         from ui.dialogs import OTASettingsDialog
-        OTASettingsDialog(self)
+        OTASettingsDialog(self, on_save=self._reload_ota_tests)
+
+    def _reload_ota_tests(self):
+        """Reload semua tm81_ota: test items setelah OTA Settings disimpan."""
+        from test_loader import load_test
+        changed = False
+        for i, name in enumerate(self._test_names):
+            if name.startswith("tm81_ota:"):
+                try:
+                    self._tests[i] = load_test(name)
+                    changed = True
+                except Exception:
+                    pass
+        if changed:
+            self._list_panel.load_tests(self._tests)
 
     def _refresh_dynamic_buttons(self):
         """Tampilkan/sembunyikan tombol settings di top bar sesuai jenis test yang dimuat.
@@ -661,10 +715,41 @@ class App(tk.Tk):
         self._update_start_btn()
         self._save_tasks()
 
+    def _reset_project_config(self, project: str):
+        """Reset field user-configurable di JSON sesuai project yang di-clear."""
+        import json as _json
+        _ROOT = os.path.dirname(os.path.abspath(__file__))
+
+        try:
+            if project == "flash":
+                path      = os.path.join(_ROOT, "config", "flash.json")
+                flash_proj = self._get_active_flash_project()
+                with open(path, encoding="utf-8") as f:
+                    data = _json.load(f)
+                regions = data.get("projects", {}).get(flash_proj, {}).get("regions", [])
+                for region in regions:
+                    region["file"] = ""
+                with open(path, "w", encoding="utf-8") as f:
+                    _json.dump(data, f, indent=2, ensure_ascii=False)
+                log.info("[clear] flash.json[%s]: semua field 'file' direset", flash_proj)
+
+            elif project == "ota":
+                path = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_ota.json")
+                with open(path, encoding="utf-8") as f:
+                    data = _json.load(f)
+                data["fw_version"] = ""
+                with open(path, "w", encoding="utf-8") as f:
+                    _json.dump(data, f, indent=2, ensure_ascii=False)
+                log.info("[clear] tm81_ota.json: fw_version direset")
+
+        except Exception as e:
+            log.warning("[clear] Gagal reset config '%s': %s", project, e)
+
     def _clear_all(self):
         if not self._tests:
             return
         if messagebox.askyesno("Clear All", "Hapus semua test dari list?"):
+            self._reset_project_config(self._project or "")
             self._tests.clear()
             self._test_names.clear()
             self._project = None
@@ -822,6 +907,10 @@ class App(tk.Tk):
                     self._display_h = data.get("display_h", self._display_h)
 
             for name in names:
+                # Migrasi: format lama "flash:boot" tidak valid lagi (harus "flash:proj:region")
+                if name.startswith("flash:") and name.count(":") < 2:
+                    log.warning("Skip test format lama %r — pilih ulang Flash project via Add Test", name)
+                    continue
                 try:
                     item = load_test(name)
                     self._tests.append(item)

@@ -43,16 +43,22 @@ class BackupReadUsage(TM81Command):
         divisor = 10 * (10 ** self._pulse_res)
         if self._day == 0:
             # monthly: 31 entries × 4 bytes
+            lines = []
             for i in range(1, 32):
                 base = i * 4
                 if base + 3 >= len(d):
                     break
                 raw = int.from_bytes(d[base:base+4], "little")
-                _log.debug(f"  Day {i:2d}: {raw/divisor:.2f} m3")
+                val = raw / divisor
+                _log.debug(f"  Day {i:2d}: {val:.2f} m3")
+                lines.append(f"Day {i:2d}: {val:.2f} m3")
+            summary = f"Month {self._month} — {len(lines)} days"
+            return f"OK:{summary}\n" + "\n".join(lines)
         else:
             raw = int.from_bytes(d[:4], "little")
-            _log.debug(f"  Day {self._day}/{self._month}: {raw/divisor:.2f} m3")
-        return "OK"
+            val = raw / divisor
+            _log.debug(f"  Day {self._day}/{self._month}: {val:.2f} m3")
+            return f"OK:Day {self._day}/{self._month}: {val:.2f} m3"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
