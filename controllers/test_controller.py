@@ -34,7 +34,7 @@ class TestController:
     @staticmethod
     def _load_workflow() -> dict:
         try:
-            path = os.path.join(_ROOT, "json", "config.json")
+            path = os.path.join(_ROOT, "config", "config.json")
             with open(path) as f:
                 return json.load(f).get("workflow", {})
         except Exception:

@@ -23,7 +23,7 @@ _STM32PROG_CANDIDATES = [
 _STFLASH_CANDIDATES = [
     "/usr/bin/st-flash",
     "/usr/local/bin/st-flash",
-    os.path.join(_ROOT, "stlink", "bin", "st-flash"),
+    os.path.join(_ROOT, "tools", "stlink", "bin", "st-flash"),
 ]
 
 

@@ -49,7 +49,8 @@ if _ROOT not in sys.path:
 from controllers.keepalive   import KeepaliveManager
 from controllers.test_controller import TestController
 from ui.test_list_panel      import TestListPanel
-from ui.dialogs              import DisplaySettingsDialog, AddTestDialog, CommissioningDialog
+from ui.dialogs              import DisplaySettingsDialog, AddTestDialog, CommissioningDialog, FlashSettingsDialog
+from ui.debug_console        import DebugConsole
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -86,8 +87,10 @@ class App(tk.Tk):
         self._station      : str            = ""
         self._project      : "str | None"   = None
 
-        self._controller = TestController()
-        self._keepalive  = KeepaliveManager()
+        self._controller     = TestController()
+        self._keepalive      = KeepaliveManager()
+        # Key = window id ("all" / "serial_comm" / dst), Value = DebugConsole
+        self._debug_consoles : dict = {}
 
         self._load_tasks()
 
@@ -96,7 +99,9 @@ class App(tk.Tk):
         self.resizable(self._preset == "Custom", self._preset == "Custom")
 
         self._build()
+        self._refresh_dynamic_buttons()
         self.after(500, self._auto_connect)
+        self.after(200, self._maybe_open_debug_console)
 
     # ------------------------------------------------------------------
     # Tkinter error handler
@@ -131,17 +136,25 @@ class App(tk.Tk):
         )
         self._proj_lbl.pack(side="left")
 
-        tk.Button(
-            top, text="⚙ Commissioning", command=self._open_commissioning,
-            bg=COLORS["header_bg"], fg="#f39c12", relief="flat",
-            font=("TkDefaultFont", fs("button")), cursor="hand2",
-        ).pack(side="right", padx=6)
+        # Frame untuk tombol settings dinamis (diisi oleh _refresh_dynamic_buttons)
+        # Tidak di-pack di sini — hanya di-pack kalau ada isinya (lihat _refresh_dynamic_buttons)
+        self._dyn_btns = tk.Frame(top, bg=COLORS["header_bg"])
 
-        tk.Button(
+        # Simpan referensi Display button agar _refresh_dynamic_buttons bisa
+        # menyisipkan _dyn_btns tepat di sebelah kanannya (via before=)
+        self._display_btn = tk.Button(
             top, text="⚙ Display", command=self._open_display_settings,
             bg=COLORS["header_bg"], fg="white", relief="flat",
             font=("TkDefaultFont", fs("button")), cursor="hand2",
-        ).pack(side="right", padx=6)
+        )
+        self._display_btn.pack(side="right", padx=6)
+
+        self._debug_btn = tk.Button(
+            top, text="🐛 Debug", command=self._toggle_debug_console,
+            bg=COLORS["header_bg"], fg="#6e7681", relief="flat",
+            font=("TkDefaultFont", fs("button")), cursor="hand2",
+        )
+        self._debug_btn.pack(side="right", padx=6)
 
         tk.Button(
             top, text="+ Add Test", command=self._open_add_test,
@@ -243,6 +256,8 @@ class App(tk.Tk):
         )
         self._list_panel.pack(fill="both", expand=True, padx=10, pady=(0, 8))
         self._list_panel.load_tests(self._tests)
+        self._refresh_dynamic_buttons()
+        self._update_start_btn()
 
     def _refresh_project_label(self):
         if hasattr(self, "_proj_lbl"):
@@ -251,16 +266,24 @@ class App(tk.Tk):
             )
 
     def _update_start_btn(self):
-        """Enable/disable tombol Start berdasarkan isi SN field (OPTIMIZE #19)."""
+        """Enable/disable tombol Start.
+
+        SN (device_id) hanya wajib jika ada TM81 test — karena TM81 butuh context
+        device_id untuk commissioning. Flash / voltage test tidak perlu SN.
+        """
         if not hasattr(self, "_toggle_btn") or not hasattr(self, "_device_var"):
             return
-        sn = self._device_var.get().strip()
-        if sn:
-            self._toggle_btn.config(state="normal")
+        sn        = self._device_var.get().strip()
+        has_tests = bool(self._test_names)
+        has_tm81  = any(n.startswith("tm81:") for n in self._test_names)
+        # SN diperlukan hanya jika ada tm81 test
+        sn_ok = sn or not has_tm81
+        if has_tests and sn_ok:
+            self._toggle_btn.config(state="normal", bg="#2980b9")
         else:
             # Jangan disable saat test sedang berjalan (tombol jadi Stop)
             if not self._controller.is_seq_running():
-                self._toggle_btn.config(state="disabled", text="▶  Start", bg="#2980b9")
+                self._toggle_btn.config(state="disabled", text="▶  Start", bg="#7f8c8d")
 
     # ------------------------------------------------------------------
     # Sequential run
@@ -364,6 +387,176 @@ class App(tk.Tk):
         test_loader.update_context({"station": self._station})
         self._save_tasks()
 
+    # ------------------------------------------------------------------
+    # Debug console
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_debug_config() -> dict:
+        try:
+            path = os.path.join(os.path.dirname(__file__), "config", "config.json")
+            with open(path, encoding="utf-8") as f:
+                return json.load(f).get("debug", {})
+        except Exception:
+            return {}
+
+    def _maybe_open_debug_console(self):
+        """Buka DebugConsole saat startup jika config debug.enabled = 1.
+
+        Membuka satu window per serial connection yang dikonfigurasi di
+        config.json → serial → connections, masing-masing difilter ke
+        logger 'serial_comm.<conn_name>'.
+        Selain itu bisa tambah window non-serial via debug.windows.
+        """
+        cfg = self._load_debug_config()
+        if not cfg.get("enabled", 0):
+            return
+        level = cfg.get("level", "DEBUG")
+
+        # 1. Satu window per serial connection (auto dari config.json)
+        try:
+            app_cfg_path = os.path.join(os.path.dirname(__file__),
+                                        "config", "config.json")
+            with open(app_cfg_path, encoding="utf-8") as f:
+                app_cfg = json.load(f)
+            serial_conns = app_cfg.get("serial", {}).get("connections", {})
+        except Exception:
+            serial_conns = {}
+
+        # Buka window dalam grid 2-kolom agar semua terlihat di layar.
+        # Tiap window 860×340, gap 8px → kolom: 868px, baris: 348px
+        _WIN_W = 868
+        _WIN_H = 348
+        _COLS  = 2
+        _grid_col, _grid_row = 0, 0
+
+        def _next_pos():
+            nonlocal _grid_col, _grid_row
+            pos = (40 + _grid_col * _WIN_W, 40 + _grid_row * _WIN_H)
+            _grid_col += 1
+            if _grid_col >= _COLS:
+                _grid_col = 0
+                _grid_row += 1
+            return pos
+
+        for conn_name, conn_def in serial_conns.items():
+            desc  = conn_def.get("description", conn_name)
+            key   = f"serial.{conn_name}"
+            title = f"Debug — {conn_name.upper()}  ({desc})"
+            self._open_named_debug(key, title,
+                                   name_filter=f"serial_comm.{conn_name}",
+                                   level=level, _offset=_next_pos())
+
+        # 2. Window tambahan dari debug.windows (misal "all", "commands")
+        _EXTRA = {
+            "all":          ("Debug — All Logs",    ""),
+            "commands":     ("Debug — TM81 Cmd",    "commands"),
+            "flash":        ("Debug — Flash",       "flash"),
+            "test_loader":  ("Debug — Test Loader", "test_loader"),
+        }
+        for wid in cfg.get("windows", []):
+            if wid in _EXTRA:
+                title, nf = _EXTRA[wid]
+                self._open_named_debug(wid, title, name_filter=nf, level=level,
+                                       _offset=_next_pos())
+
+    def _open_named_debug(self, key: str, title: str,
+                          name_filter: str = "", level: str = "DEBUG",
+                          _offset: tuple = None):
+        """Buka (atau fokus) satu DebugConsole window beridentitas key.
+
+        _offset = (x, y) tambahan dari posisi main window — agar windows
+        tidak bertumpuk saat banyak dibuka sekaligus.
+        """
+        existing = self._debug_consoles.get(key)
+        if existing and existing.winfo_exists():
+            existing.lift()
+            return existing
+        win = DebugConsole(self, min_level=level,
+                           title=title, name_filter=name_filter)
+        # Posisikan window relatif terhadap main window
+        if _offset:
+            try:
+                mx = self.winfo_rootx() + _offset[0]
+                my = self.winfo_rooty() + _offset[1]
+                win.geometry(f"+{mx}+{my}")
+            except Exception:
+                pass
+        self._debug_consoles[key] = win
+        self._update_debug_btn()
+        orig_close = win._on_close
+        def _on_close_hook(k=key, fn=orig_close):
+            fn()
+            self._debug_consoles.pop(k, None)
+            self._update_debug_btn()
+        win.protocol("WM_DELETE_WINDOW", _on_close_hook)
+        return win
+
+    def _toggle_debug_console(self):
+        """Klik 🐛 Debug — tampilkan menu pilihan window."""
+        menu = tk.Menu(self, tearoff=0,
+                       bg="#161b22", fg="#c9d1d9",
+                       activebackground="#264f78", activeforeground="white",
+                       font=("Consolas", 9))
+        cfg   = self._load_debug_config()
+        level = cfg.get("level", "DEBUG")
+
+        # --- Per-serial entries (dari config.json) ---
+        try:
+            app_cfg_path = os.path.join(os.path.dirname(__file__),
+                                        "config", "config.json")
+            with open(app_cfg_path, encoding="utf-8") as f:
+                serial_conns = json.load(f).get("serial", {}).get("connections", {})
+        except Exception:
+            serial_conns = {}
+
+        if serial_conns:
+            menu.add_command(label="── Serial ports ──", state="disabled")
+        for conn_name, conn_def in serial_conns.items():
+            desc   = conn_def.get("description", conn_name)
+            key    = f"serial.{conn_name}"
+            title  = f"Debug — {conn_name.upper()}  ({desc})"
+            nf     = f"serial_comm.{conn_name}"
+            active = key in self._debug_consoles and \
+                     self._debug_consoles[key].winfo_exists()
+            prefix = "✓ " if active else "  "
+            menu.add_command(
+                label=f"{prefix}{conn_name.upper()}  —  {desc}",
+                command=lambda k=key, t=title, f=nf, lv=level:
+                    self._open_named_debug(k, t, f, lv),
+            )
+
+        # --- Window lainnya ---
+        menu.add_separator()
+        extras = [
+            ("all",         "All logs",       ""),
+            ("commands",    "TM81 commands",  "commands"),
+            ("flash",       "Flash / STM32",  "flash"),
+            ("test_loader", "Test loader",    "test_loader"),
+        ]
+        for key, label, nf in extras:
+            active = key in self._debug_consoles and \
+                     self._debug_consoles[key].winfo_exists()
+            prefix = "✓ " if active else "  "
+            menu.add_command(
+                label=f"{prefix}{label}",
+                command=lambda k=key, t=f"Debug — {label}", f=nf, lv=level:
+                    self._open_named_debug(k, t, f, lv),
+            )
+        try:
+            btn = self._debug_btn
+            menu.tk_popup(btn.winfo_rootx(),
+                          btn.winfo_rooty() + btn.winfo_height())
+        finally:
+            menu.grab_release()
+
+    def _update_debug_btn(self):
+        if not hasattr(self, "_debug_btn"):
+            return
+        any_open = any(w.winfo_exists()
+                       for w in self._debug_consoles.values())
+        self._debug_btn.config(fg="#58a6ff" if any_open else "#6e7681")
+
     def _open_display_settings(self):
         DisplaySettingsDialog(self, self._preset, on_apply=self._apply_display)
 
@@ -379,9 +572,64 @@ class App(tk.Tk):
             child.destroy()
         self._build()
         self._list_panel.load_tests(self._tests)
+        self._update_debug_btn()
 
     def _open_commissioning(self):
         CommissioningDialog(self)
+
+    def _open_flash_settings(self):
+        FlashSettingsDialog(self)
+
+    def _open_ota_settings(self):
+        from ui.dialogs import OTASettingsDialog
+        OTASettingsDialog(self)
+
+    def _refresh_dynamic_buttons(self):
+        """Tampilkan/sembunyikan tombol settings di top bar sesuai jenis test yang dimuat.
+
+        _dyn_btns di-pack/pack_forget secara dinamis agar tombol static (Display/Debug/Add Test)
+        selalu di pojok kanan ketika tidak ada dynamic button.
+        """
+        for w in self._dyn_btns.winfo_children():
+            w.destroy()
+
+        fs = lambda k: max(7, int(BASE_FONTS[k] * self._scale))
+        has_tm81  = any(n.startswith("tm81:")       for n in self._test_names)
+        has_flash = any(n.startswith("flash:")      for n in self._test_names)
+        has_ota   = any(n.startswith("tm81_ota:") for n in self._test_names)
+
+        if has_tm81:
+            tk.Button(
+                self._dyn_btns, text="⚙ Commissioning",
+                command=self._open_commissioning,
+                bg=COLORS["header_bg"], fg="#f39c12", relief="flat",
+                font=("TkDefaultFont", fs("button")), cursor="hand2",
+            ).pack(side="right", padx=6)
+
+        if has_flash:
+            tk.Button(
+                self._dyn_btns, text="⚙ Flash Settings",
+                command=self._open_flash_settings,
+                bg=COLORS["header_bg"], fg="#f39c12", relief="flat",
+                font=("TkDefaultFont", fs("button")), cursor="hand2",
+            ).pack(side="right", padx=6)
+
+        if has_ota:
+            tk.Button(
+                self._dyn_btns, text="⚙ OTA Settings",
+                command=self._open_ota_settings,
+                bg=COLORS["header_bg"], fg="#f39c12", relief="flat",
+                font=("TkDefaultFont", fs("button")), cursor="hand2",
+            ).pack(side="right", padx=6)
+
+        # Pack/unpack frame agar tidak makan tempat ketika kosong.
+        # before=self._display_btn → _dyn_btns muncul di KANAN Display button.
+        has_any = has_tm81 or has_flash or has_ota
+        if has_any:
+            if not self._dyn_btns.winfo_ismapped():
+                self._dyn_btns.pack(side="right", before=self._display_btn)
+        else:
+            self._dyn_btns.pack_forget()
 
     def _open_add_test(self):
         AddTestDialog(self, on_add=self._add_test, current_project=self._project)
@@ -409,6 +657,8 @@ class App(tk.Tk):
                 self._keepalive.stop()
 
         self._list_panel.load_tests(self._tests)
+        self._refresh_dynamic_buttons()
+        self._update_start_btn()
         self._save_tasks()
 
     def _clear_all(self):
@@ -420,7 +670,9 @@ class App(tk.Tk):
             self._project = None
             self._keepalive.stop()
             self._refresh_project_label()
+            self._refresh_dynamic_buttons()
             self._list_panel.load_tests(self._tests)
+            self._update_start_btn()
             self._save_tasks()
             self._status_var.set("Ready")
 
@@ -438,7 +690,7 @@ class App(tk.Tk):
     @staticmethod
     def _load_db_config() -> dict:
         try:
-            path = os.path.join(os.path.dirname(__file__), "json", "config.json")
+            path = os.path.join(os.path.dirname(__file__), "config", "config.json")
             with open(path, encoding="utf-8") as f:
                 return json.load(f).get("database", {})
         except Exception:

@@ -23,7 +23,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _load_flash_json() -> dict:
-    path = os.path.join(_ROOT, "json", "flash.json")
+    path = os.path.join(_ROOT, "config", "flash.json")
     with open(path) as f:
         return json.load(f)
 
@@ -55,19 +55,21 @@ class FlashTest(TestBase):
 
         try:
             cfg_data  = _load_flash_json()
-            flash_dir = os.path.join(_ROOT, cfg_data.get("flash_dir", "file_flash_fota"))
+            flash_dir = os.path.join(_ROOT, cfg_data.get("flash_dir", "firmware"))
         except Exception as e:
             return f"NG:Gagal baca flash.json: {e}"
 
-        fw_file = region.get("file", "")
-        if not fw_file:
-            return f"NG:field 'file' kosong untuk region {region.get('name')!r}"
+        # Baca file & address langsung dari region (single source of truth)
+        fw_file = region.get("file", "").strip()
+        address = region.get("address", "0x08000000").strip()
 
-        fw_path = os.path.join(flash_dir, fw_file)
+        if not fw_file:
+            return f"NG:field 'file' kosong untuk region '{region.get('name', '?')}'"
+
+        # Jika path absolut (dari Browse), pakai langsung; jika relatif, gabung flash_dir
+        fw_path = fw_file if os.path.isabs(fw_file) else os.path.join(flash_dir, fw_file)
         if not os.path.isfile(fw_path):
             return f"NG:file tidak ada: {fw_path}"
-
-        address = region.get("address", "0x08000000")
         reset   = region.get("reset", True)
         cfg     = Stm32Config(stlink_bin=tool, flash_addr=address, reset=reset)
         result  = Stm32Flasher(cfg).flash(fw_path, progress_cb=self.report_progress)

@@ -1,17 +1,16 @@
 """
 project.py — Project classification helpers.
 
-"Project" = kumpulan test yang saling eksklusif (tm81 / flash).
+"Project" = kumpulan test yang saling eksklusif (tm81 / flash / ota).
 "Universal" = test yang bisa ditambahkan ke project mana saja.
 """
 
 _PROJECT_PREFIXES: dict[str, list[str]] = {
     "tm81":  ["tm81:"],
     "flash": ["flash:"],
+    "ota":   ["tm81_ota:"],
 }
-_PROJECT_SINGLES: dict[str, list[str]] = {
-    "flash": ["tm81_flash_test"],
-}
+_PROJECT_SINGLES: dict[str, list[str]] = {}
 
 
 def module_project(module_name: str) -> "str | None":

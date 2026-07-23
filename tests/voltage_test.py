@@ -20,7 +20,7 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _load_voltage_json() -> dict:
-    path = os.path.join(_ROOT, "json", "voltage.json")
+    path = os.path.join(_ROOT, "config", "voltage.json")
     with open(path) as f:
         return json.load(f)
 

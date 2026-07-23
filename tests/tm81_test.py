@@ -1,12 +1,16 @@
 """
 tests/tm81_test.py — Single entry point untuk semua test TM81.
 
-Test didefinisikan di json/tm81_test.json.
-Factory _make_tm81_item() membuat AutoTest per entry, dengan run_fn
-yang memanggil command class dari commands/tm81/.
+File ini menjadi satu-satunya program TM81. Di AddTestDialog akan muncul DUA grup:
+  1. TM81 (N test)     — dibaca dari commands/tm81/config/tm81_test.json  → prefix "tm81:"
+  2. TM81 Flash (4 step) — dibaca dari commands/tm81/config/tm81_ota.json → prefix "tm81_ota:"
 
-Format di tasks.json: "tm81:<name>"
-  misal: "tm81:ping", "tm81:get_version", dst.
+Factory _make_tm81_item() dan _make_tm81_ota_item() masing-masing membuat
+TestItem per entry, dengan run_fn yang memanggil command class dari commands/tm81/.
+
+Format di tasks.json:
+  "tm81:<name>"       misal: "tm81:get_version", "tm81:sensor_data"
+  "tm81_ota:<name>" misal: "tm81_ota:write_fw", "tm81_ota:bl_goto_app"
 """
 
 import sys as _sys, os as _os
@@ -48,7 +52,7 @@ if __name__ == "__main__":
     import importlib, json
 
     _here = os.path.dirname(os.path.abspath(__file__))
-    _json_path = os.path.join(_here, "..", "json", "tm81_test.json")
+    _json_path = os.path.join(_here, "..", "commands", "tm81", "config", "tm81_test.json")
     if not os.path.exists(_json_path):
         print("NG: tm81_test.json tidak ditemukan"); sys.exit(1)
 

@@ -22,7 +22,7 @@ Cara pakai:
 
 from __future__ import annotations
 import logging
-import os, sys, json
+import os, sys, json, threading
 from typing import Optional
 from serial_comm import SerialComm, SerialConfig, FrameParser, RawLineParser, TM81Parser
 
@@ -34,7 +34,7 @@ _log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _load_json() -> dict:
-    path = os.path.join(os.path.dirname(__file__), "..", "json", "config.json")
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "config.json")
     try:
         with open(os.path.abspath(path)) as f:
             return json.load(f).get("serial", {})
@@ -161,7 +161,7 @@ def connect(conn: str = None, parser=None) -> bool:
         return False
 
     prs  = parser or _make_parser(name)
-    comm = SerialComm(cfg, prs)
+    comm = SerialComm(cfg, prs, conn_name=name)
     # Jika ada port langsung (misal bluetooth), lewati device_name scan
     direct = _direct_port(name)
     ok   = comm.connect(port=direct)  # port=None -> auto-find via device_name
@@ -170,19 +170,60 @@ def connect(conn: str = None, parser=None) -> bool:
         # Jika debug_rx=true di config.json, cetak semua data masuk ke terminal
         if _CONN_DEFS.get(name, {}).get("debug_rx", False):
             _register_debug_rx(comm, name)
+        # Auto-reconnect: saat port terputus, coba sambung kembali otomatis
+        comm.on_disconnect(lambda n=name: _on_disconnected(n))
     return ok
 
 
+# Set koneksi yang sedang dalam proses reconnect — cegah double-retry
+_reconnecting: set = set()
+
+
+def _on_disconnected(name: str):
+    """Dipanggil oleh SerialComm saat port terputus. Mulai retry loop."""
+    _conns.pop(name, None)
+    _log.warning("[serial] %r terputus — akan coba reconnect otomatis", name)
+    _schedule_reconnect(name, delay=3.0)
+
+
+def _schedule_reconnect(name: str, delay: float = 3.0):
+    """Coba reconnect setelah `delay` detik, dengan exponential backoff (max 30 detik)."""
+    if name in _reconnecting:
+        return
+    _reconnecting.add(name)
+
+    def _retry():
+        import time
+        time.sleep(delay)
+        _reconnecting.discard(name)
+        if is_connected(name):
+            return   # sudah terhubung (mungkin manual connect)
+        _log.info("[serial] reconnect %r ...", name)
+        ok = connect(name)
+        if ok:
+            _log.info("[serial] %r terhubung kembali", name)
+        else:
+            next_delay = min(delay * 1.5, 30.0)
+            _log.debug("[serial] %r gagal, coba lagi %.0fs", name, next_delay)
+            _schedule_reconnect(name, delay=next_delay)
+
+    threading.Thread(target=_retry, daemon=True,
+                     name=f"reconnect-{name}").start()
+
+
 def _register_debug_rx(comm: SerialComm, name: str):
-    """Daftarkan callback yang mencetak setiap frame yang masuk ke terminal."""
+    """Daftarkan callback RX — log ke serial_comm.<name> agar muncul di debug window."""
+    # Pakai logger yang sama dengan SerialComm instance (serial_comm.<name>)
+    rx_log = logging.getLogger(f"serial_comm.{name}")
+
     def _on_data(frame):
         if frame.valid:
             payload = frame.payload.decode("utf-8", errors="replace").strip()
-            _log.debug("[%s] RX: %r", name, payload)
+            rx_log.debug("RX: %r", payload)
         else:
             raw = frame.raw.decode("utf-8", errors="replace").strip()
             if raw:
-                _log.debug("[%s] RX (raw): %r", name, raw)
+                rx_log.debug("RX (raw): %r", raw)
     comm.on_data(_on_data)
 
 

@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from config import COLORS
-from test_row_widget import TestRowWidget
+from ui.test_row_widget import TestRowWidget
 
 
 class TestListPanel(tk.Frame):

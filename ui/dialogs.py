@@ -1,5 +1,5 @@
 """
-ui/dialogs.py — DisplaySettingsDialog, AddTestDialog, CommissioningDialog.
+ui/dialogs.py — DisplaySettingsDialog, AddTestDialog, CommissioningDialog, FlashSettingsDialog, OTASettingsDialog.
 """
 
 import sys
@@ -21,6 +21,7 @@ from test_loader import (
     load_flash_tests, flash_module_names,
     load_voltage_tests, voltage_module_names,
     load_tm81_tests, tm81_module_names,
+    load_tm81_flash_tests, tm81_flash_module_names,
 )
 
 
@@ -134,8 +135,9 @@ class AddTestDialog(tk.Toplevel):
         # Project aktif banner
         if self._current_project:
             msg = {
-                "tm81":  "Project aktif: TM81  (flash tidak bisa ditambahkan)",
-                "flash": "Project aktif: Flash  (tm81 tidak bisa ditambahkan)",
+                "tm81":  "Project aktif: TM81  (flash / TM81 Flash tidak bisa ditambahkan)",
+                "flash": "Project aktif: Flash  (tm81 / TM81 Flash tidak bisa ditambahkan)",
+                "ota":   "Project aktif: TM81 Flash  (tm81 / flash tidak bisa ditambahkan)",
             }.get(self._current_project, f"Project aktif: {self._current_project}")
             tk.Label(self, text=msg, font=("TkDefaultFont", 9), fg="#888",
                      pady=4, anchor="w").grid(
@@ -194,6 +196,14 @@ class AddTestDialog(tk.Toplevel):
                  f"{len(tm81_names)} entry", st, self._add_all_tm81)
             row_idx += 1
 
+        # TM81 Flash
+        tm81_flash_names = tm81_flash_module_names()
+        if tm81_flash_names:
+            st = self._btn_state("ota")
+            _row(f"TM81 Flash ({len(tm81_flash_names)} step)", "progress",
+                 f"{len(tm81_flash_names)} step", st, self._add_all_tm81_flash)
+            row_idx += 1
+
         # Modul lainnya
         for name, label, mod in self._modules:
             mod_proj = module_project(name)
@@ -224,6 +234,10 @@ class AddTestDialog(tk.Toplevel):
         for item, name in zip(load_tm81_tests(), tm81_module_names()):
             self._on_add(item, name)
 
+    def _add_all_tm81_flash(self):
+        for item, name in zip(load_tm81_flash_tests(), tm81_flash_module_names()):
+            self._on_add(item, name)
+
 
 # ============================================================================
 # CommissioningDialog
@@ -235,7 +249,7 @@ class CommissioningDialog(tk.Toplevel):
     Membaca dan menyimpan ke json/commissioning.json.
     """
 
-    _JSON_PATH = os.path.join(_ROOT, "json", "commissioning.json")
+    _JSON_PATH = os.path.join(_ROOT, "commands", "tm81", "config", "commissioning.json")
 
     _JOIN_MODES  = ["0 — None", "1 — ABP", "2 — OTAA"]
     _DEV_CLASSES = ["0 — Class A", "1 — Class B", "2 — Class C"]
@@ -490,6 +504,327 @@ class CommissioningDialog(tk.Toplevel):
 
         try:
             self._save(data)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Gagal simpan", str(e), parent=self)
+
+
+# ============================================================================
+# FlashSettingsDialog
+# ============================================================================
+
+class FlashSettingsDialog(tk.Toplevel):
+    """
+    Dialog untuk mengatur file firmware dan alamat flash per region.
+    Membaca default dari config/flash.json, menyimpan override ke config/flash_settings.json.
+    """
+
+    _FLASH_JSON    = os.path.join(_ROOT, "config", "flash.json")
+    _SETTINGS_JSON = os.path.join(_ROOT, "config", "flash_settings.json")
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Flash Settings")
+        self.resizable(False, False)
+        self.grab_set()
+        self.configure(bg=COLORS["bg"])
+
+        self._regions  = self._load_flash_json()
+        self._saved    = self._load_settings()
+        self._entries  = {}   # {region_name: {"file": StringVar, "address": StringVar}}
+
+        self._build()
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{x}+{y}")
+
+    # ------------------------------------------------------------------
+    # Load / save helpers
+    # ------------------------------------------------------------------
+
+    def _load_flash_json(self) -> list:
+        try:
+            with open(self._FLASH_JSON, encoding="utf-8") as f:
+                return json.load(f).get("regions", [])
+        except Exception:
+            return []
+
+    def _load_settings(self) -> dict:
+        try:
+            with open(self._SETTINGS_JSON, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_settings(self, data: dict):
+        os.makedirs(os.path.dirname(self._SETTINGS_JSON), exist_ok=True)
+        with open(self._SETTINGS_JSON, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
+
+    def _build(self):
+        pad = {"padx": 12, "pady": 6}
+
+        # Header
+        tk.Label(
+            self, text="Flash Settings",
+            bg=COLORS["bg"], fg=COLORS["text"],
+            font=("TkDefaultFont", 11, "bold"),
+        ).pack(**pad)
+
+        tk.Frame(self, height=1, bg=COLORS["border"]).pack(fill="x", padx=12)
+
+        if not self._regions:
+            tk.Label(
+                self, text="Tidak ada region di flash.json",
+                bg=COLORS["bg"], fg=COLORS["error"],
+            ).pack(**pad)
+            tk.Button(self, text="Tutup", command=self.destroy).pack(pady=8)
+            return
+
+        # Satu card per region
+        for region in self._regions:
+            name    = region.get("name", "unknown")
+            label   = region.get("description", name)
+            def_file = region.get("file", "")
+            def_addr = region.get("address", "0x08000000")
+
+            saved_region = self._saved.get(name, {})
+
+            file_var = tk.StringVar(value=saved_region.get("file", def_file))
+            addr_var = tk.StringVar(value=saved_region.get("address", def_addr))
+            self._entries[name] = {"file": file_var, "address": addr_var}
+
+            card = tk.Frame(self, bg=COLORS["card"],
+                            highlightthickness=1,
+                            highlightbackground=COLORS["border"])
+            card.pack(fill="x", padx=12, pady=6)
+
+            tk.Label(
+                card, text=f"Region: {label}",
+                bg=COLORS["card"], fg=COLORS["text"],
+                font=("TkDefaultFont", 9, "bold"),
+            ).grid(row=0, column=0, columnspan=3, sticky="w", padx=8, pady=(6, 2))
+
+            # File firmware
+            tk.Label(card, text="File:", bg=COLORS["card"],
+                     fg=COLORS["text"]).grid(row=1, column=0, sticky="w", padx=8, pady=2)
+            tk.Entry(
+                card, textvariable=file_var, width=36,
+                bg=COLORS["surface"], fg=COLORS["text"],
+                relief="flat", insertbackground=COLORS["text"],
+                highlightthickness=1, highlightbackground=COLORS["border"],
+                highlightcolor=COLORS["running"],
+            ).grid(row=1, column=1, padx=4, pady=2)
+
+            def _browse(var=file_var):
+                from tkinter import filedialog
+                path = filedialog.askopenfilename(
+                    parent=self,
+                    title="Pilih firmware",
+                    filetypes=[("Binary", "*.bin *.hex"), ("All", "*.*")],
+                )
+                if path:
+                    var.set(path)
+
+            tk.Button(
+                card, text="Browse", command=_browse,
+                bg=COLORS["border"], fg=COLORS["text"], relief="flat",
+                cursor="hand2",
+            ).grid(row=1, column=2, padx=(0, 8), pady=2)
+
+            # Address
+            tk.Label(card, text="Address:", bg=COLORS["card"],
+                     fg=COLORS["text"]).grid(row=2, column=0, sticky="w", padx=8, pady=(2, 6))
+            tk.Entry(
+                card, textvariable=addr_var, width=16,
+                bg=COLORS["surface"], fg=COLORS["text"],
+                font=("Courier", 9),
+                relief="flat", insertbackground=COLORS["text"],
+                highlightthickness=1, highlightbackground=COLORS["border"],
+                highlightcolor=COLORS["running"],
+            ).grid(row=2, column=1, sticky="w", padx=4, pady=(2, 6))
+
+        # Buttons
+        tk.Frame(self, height=1, bg=COLORS["border"]).pack(fill="x", padx=12, pady=(8, 0))
+        btn_row = tk.Frame(self, bg=COLORS["bg"])
+        btn_row.pack(fill="x", padx=12, pady=8)
+
+        tk.Button(
+            btn_row, text="Batal", command=self.destroy,
+            bg=COLORS["border"], fg=COLORS["text"], relief="flat",
+            width=8, cursor="hand2",
+        ).pack(side="right", padx=(4, 0))
+
+        tk.Button(
+            btn_row, text="Simpan", command=self._on_save,
+            bg=COLORS["running"], fg="white", relief="flat",
+            width=8, cursor="hand2",
+        ).pack(side="right")
+
+    def _on_save(self):
+        data = {}
+        for name, vars_ in self._entries.items():
+            file_val = vars_["file"].get().strip()
+            addr_val = vars_["address"].get().strip()
+
+            # Validasi address format
+            if addr_val and not addr_val.startswith("0x"):
+                messagebox.showerror(
+                    "Format salah",
+                    f"Region '{name}': Address harus diawali 0x (contoh: 0x08000000)",
+                    parent=self,
+                )
+                return
+
+            data[name] = {
+                "file":    file_val,
+                "address": addr_val,
+            }
+
+        try:
+            self._save_settings(data)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Gagal simpan", str(e), parent=self)
+
+
+# ============================================================================
+# OTASettingsDialog
+# ============================================================================
+
+class OTASettingsDialog(tk.Toplevel):
+    """
+    Dialog ringkas untuk mengatur firmware OTA TM81.
+    Membaca dan menyimpan ke commands/tm81/config/tm81_flash.json.
+    """
+
+    _JSON_PATH = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_flash.json")
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("OTA Flash Settings")
+        self.resizable(False, False)
+        self.grab_set()
+
+        self._cfg = self._load()
+        self._build()
+
+        self.update_idletasks()
+        px = parent.winfo_rootx() + parent.winfo_width()  // 2 - self.winfo_width()  // 2
+        py = parent.winfo_rooty() + parent.winfo_height() // 2 - self.winfo_height() // 2
+        self.geometry(f"+{px}+{py}")
+
+    # ------------------------------------------------------------------ I/O
+
+    def _load(self) -> dict:
+        try:
+            with open(self._JSON_PATH, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save(self, cfg: dict):
+        os.makedirs(os.path.dirname(self._JSON_PATH), exist_ok=True)
+        with open(self._JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    # ------------------------------------------------------------------ UI
+
+    def _build(self):
+        C  = COLORS
+        fs = lambda k: max(7, int(BASE_FONTS[k]))
+        self.configure(bg=C["bg"])
+
+        # Header
+        hdr = tk.Frame(self, bg=C["header_bg"], pady=8)
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="⚙  OTA Flash Settings",
+                 bg=C["header_bg"], fg="white",
+                 font=("TkDefaultFont", fs("label"), "bold"),
+                 padx=12).pack(side="left")
+        tk.Label(hdr, text="tm81_flash.json",
+                 bg=C["header_bg"], fg=C["sub"],
+                 font=("TkDefaultFont", fs("small")), padx=8).pack(side="left")
+
+        body = tk.Frame(self, bg=C["bg"], padx=14, pady=10)
+        body.pack(fill="x")
+
+        surf = C["surface"]
+        brd  = C["border"]
+
+        def _field(label: str, key: str, default: str, width: int = 32, browse: bool = False):
+            row = tk.Frame(body, bg=surf, pady=2)
+            row.pack(fill="x", pady=3)
+            tk.Label(row, text=label, bg=surf, fg=C["sub"],
+                     font=("TkDefaultFont", fs("small")),
+                     width=14, anchor="w").pack(side="left", padx=(8, 4))
+            var = tk.StringVar(value=str(self._cfg.get(key, default)))
+            ent = tk.Entry(row, textvariable=var, width=width,
+                           bg=C["card"], fg=C["text"], insertbackground=C["text"],
+                           relief="flat", font=("Courier", fs("small")),
+                           highlightthickness=1, highlightbackground=brd)
+            ent.pack(side="left", padx=(0, 4))
+            if browse:
+                def _browse(_var=var):
+                    from tkinter import filedialog
+                    fw_dir = os.path.join(_ROOT, self._cfg.get("fw_dir", "firmware/App"))
+                    path = filedialog.askopenfilename(
+                        title="Pilih file firmware",
+                        initialdir=fw_dir if os.path.isdir(fw_dir) else _ROOT,
+                        filetypes=[("Binary", "*.bin"), ("All files", "*.*")],
+                        parent=self,
+                    )
+                    if path:
+                        _var.set(os.path.basename(path))
+                tk.Button(row, text="Browse", command=_browse,
+                          bg="#2980b9", fg="white", relief="flat",
+                          font=("TkDefaultFont", fs("small")),
+                          padx=6, cursor="hand2").pack(side="left")
+            return var
+
+        self._v_fw_dir     = _field("FW Directory", "fw_dir",     "firmware/App")
+        self._v_fw_version = _field("FW Version",   "fw_version", "",            browse=True)
+        self._v_connection = _field("Connection",   "connection", "ch340",  width=10)
+        self._v_chunk_size = _field("Chunk Size",   "chunk_size", "512",    width=6)
+
+        # Tests info (read-only)
+        tests = self._cfg.get("tests", [])
+        if tests:
+            tk.Label(body, text=f"Steps ({len(tests)} langkah):",
+                     bg=C["bg"], fg=C["sub"],
+                     font=("TkDefaultFont", fs("small"))).pack(anchor="w", pady=(6, 0))
+            for i, s in enumerate(tests):
+                tk.Label(body, text=f"  {i+1}. {s.get('label', '?')}",
+                         bg=C["bg"], fg=C["text"],
+                         font=("TkDefaultFont", fs("small"))).pack(anchor="w")
+
+        # Buttons
+        btn_row = tk.Frame(self, bg=C["bg"])
+        btn_row.pack(pady=(4, 10))
+        tk.Button(btn_row, text="Simpan", width=10,
+                  bg="#27ae60", fg="white", relief="flat",
+                  font=("TkDefaultFont", fs("button")),
+                  command=self._on_save).pack(side="left", padx=6)
+        tk.Button(btn_row, text="Batal", width=8,
+                  relief="flat", font=("TkDefaultFont", fs("button")),
+                  command=self.destroy).pack(side="left", padx=6)
+
+    def _on_save(self):
+        cfg = dict(self._cfg)
+        cfg["fw_dir"]     = self._v_fw_dir.get().strip()
+        cfg["fw_version"] = self._v_fw_version.get().strip()
+        cfg["connection"] = self._v_connection.get().strip()
+        try:
+            cfg["chunk_size"] = int(self._v_chunk_size.get().strip())
+        except ValueError:
+            pass
+        try:
+            self._save(cfg)
             self.destroy()
         except Exception as e:
             messagebox.showerror("Gagal simpan", str(e), parent=self)

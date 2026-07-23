@@ -1,11 +1,14 @@
 """
 commands/tm81/bl_write_firmware.py — OTA Flash via IrDA (TM81 Bootloader)
 
-Flow:
-  1. AppGotoBL  — reboot ke bootloader (skip jika sudah di BL)
-  2. BL_SET_RDY — kirim fw_size (4B LE) + CRC32-MPEG2 (4B LE)
-  3. BL_FW_DATA — kirim data chunk per chunk (frame_id + chunk_size + data)
-  4. BL_GOTO_APP — lompat ke App
+Mode standalone (default):
+  1. BL_SET_RDY — kirim fw_size (4B LE) + CRC32-MPEG2 (4B LE)
+  2. BL_FW_DATA — kirim data chunk per chunk (frame_id + chunk_size + data)
+  3. BL_GOTO_APP — lompat ke App
+
+Mode chunks-only (skip_set_rdy=True, skip_goto_app=True):
+  Hanya kirim BL_FW_DATA — dipakai sebagai step 3 dari 4-step OTA flow:
+    1. AppGotoBL  → 2. BLPrepare (SET_RDY) → 3. BLWriteFirmware (chunks) → 4. BLGotoApp
 
 progress_cb(float 0-100) dipanggil setiap chunk selesai dikirim.
 """
@@ -37,10 +40,13 @@ class BLWriteFirmware(TM81Command):
     def __init__(self, conn=None, timeout=None, params=None):
         super().__init__(conn, timeout)
         p = params or {}
-        self._fw_path      = p.get("fw_path", "")
-        self._chunk_size   = p.get("chunk_size",   self.CHUNK_SIZE)
-        self._fill_with_ff = p.get("fill_with_ff", self.FILL_WITH_FF)
-        self._progress_cb  = p.get("progress_cb",  None)
+        self._fw_path       = p.get("fw_path", "")
+        self._chunk_size    = p.get("chunk_size",    self.CHUNK_SIZE)
+        self._fill_with_ff  = p.get("fill_with_ff",  self.FILL_WITH_FF)
+        self._progress_cb   = p.get("progress_cb",   None)
+        # 4-step flow: set True jika BLPrepare & BLGotoApp dipanggil terpisah
+        self._skip_set_rdy  = p.get("skip_set_rdy",  False)
+        self._skip_goto_app = p.get("skip_goto_app", False)
 
     # ------------------------------------------------------------------
     # Public
@@ -60,24 +66,27 @@ class BLWriteFirmware(TM81Command):
         if self._fill_with_ff and fw_size < self.APP_MAX_SIZE:
             fw_data += b"\xff" * (self.APP_MAX_SIZE - fw_size)
 
-        _log.debug(f"  FW: {os.path.basename(self._fw_path)}")
-        _log.debug(f"  Size: {fw_size} B  CRC: {crc_bytes.hex(' ')}")
+        _log.debug("  FW: %s", os.path.basename(self._fw_path))
+        _log.debug("  Size: %d B  CRC: %s", fw_size, crc_bytes.hex(" "))
 
-        # Step 1: BL_SET_RDY — kirim fw_size + CRC
-        r = self._bl_set_rdy(fw_size, crc_bytes)
-        if r != "OK":
-            return r
-
-        time.sleep(0.5)
+        # Step 1: BL_SET_RDY — kirim fw_size + CRC (skip jika BLPrepare sudah melakukannya)
+        if not self._skip_set_rdy:
+            r = self._bl_set_rdy(fw_size, crc_bytes)
+            if r != "OK":
+                return r
+            time.sleep(0.5)
 
         # Step 2: BL_FW_DATA — kirim chunk per chunk
         r = self._bl_send_chunks(fw_data)
         if r != "OK":
             return r
 
-        # Step 3: BL_GOTO_APP
-        r = self._bl_goto_app()
-        return r
+        # Step 3: BL_GOTO_APP (skip jika BLGotoApp dipanggil terpisah)
+        if not self._skip_goto_app:
+            r = self._bl_goto_app()
+            return r
+
+        return "OK"
 
     # ------------------------------------------------------------------
     # Internal steps

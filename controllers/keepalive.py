@@ -38,7 +38,7 @@ class KeepaliveManager:
     @staticmethod
     def _load_cfg() -> dict:
         try:
-            path = os.path.join(_ROOT, "json", "config.json")
+            path = os.path.join(_ROOT, "config", "config.json")
             with open(path) as f:
                 return json.load(f).get("keepalive", {})
         except Exception:

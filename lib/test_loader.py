@@ -20,14 +20,17 @@ Mendukung dua gaya penulisan test:
 Flash tasks (format khusus):
   - Disimpan di tasks.json sebagai "flash:<region_name>", misal "flash:boot"
   - Di-expand dari flash.json: satu region = satu row task terpisah
-  - load_flash_tests() -> list[TestItem]  (semua region sekaligus)
-  - load_test("flash:boot")              (satu region)
 
 TM81 tasks (format khusus):
   - Disimpan di tasks.json sebagai "tm81:<name>", misal "tm81:ping"
-  - Di-expand dari json/tm81_test.json
-  - load_tm81_tests() -> list[TestItem]  (semua test sekaligus)
-  - load_test("tm81:ping")              (satu test)
+  - Di-expand dari commands/tm81/config/tm81_test.json
+
+TM81 Flash tasks (format khusus, sama dengan TM81):
+  - Disimpan di tasks.json sebagai "tm81_ota:<name>", misal "tm81_ota:write_fw"
+  - Di-expand dari commands/tm81/config/tm81_ota.json -> tests
+  - Setiap langkah = satu row; write_fw memakai ProgressBarTest
+  - load_tm81_ota_tests() -> list[TestItem]  (semua 4 langkah sekaligus)
+  - load_test("tm81_ota:write_fw")           (satu langkah)
 """
 
 import importlib
@@ -64,10 +67,11 @@ def update_context(data: dict) -> None:
         context.update(data)
 
 _ROOT               = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-_FLASH_JSON         = os.path.join(_ROOT, "json", "flash.json")
-_VOLTAGE_JSON       = os.path.join(_ROOT, "json", "voltage.json")
-_TM81_JSON          = os.path.join(_ROOT, "json", "tm81_test.json")
-_COMMISSIONING_JSON = os.path.join(_ROOT, "json", "commissioning.json")
+_FLASH_JSON         = os.path.join(_ROOT, "config", "flash.json")
+_VOLTAGE_JSON       = os.path.join(_ROOT, "config", "voltage.json")
+_TM81_JSON          = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_test.json")
+_TM81_OTA_JSON      = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_ota.json")
+_COMMISSIONING_JSON = os.path.join(_ROOT, "commands", "tm81", "config", "commissioning.json")
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +91,14 @@ def _make_flash_item(region: dict):
     """Buat satu ProgressBarTest untuk satu region flash."""
     from tests.flash_test import FlashTest
 
-    name = region.get("name", "unknown")
-    desc = region.get("description", f"Flash region '{name}'")
+    name      = region.get("name", "unknown")
+    base_desc = region.get("description", f"Flash region '{name}'")
+
+    # Baca file & address langsung dari flash.json (single source of truth)
+    fw_file  = region.get("file", "").strip()
+    address  = region.get("address", "0x08000000").strip()
+    fw_label = os.path.basename(fw_file) if fw_file else "⚠ file belum diset"
+    desc     = f"{base_desc}  •  {fw_label}  @  {address}"
 
     # Buat subclass anonim agar setiap instance punya REGION sendiri
     cls      = type(f"_FlashTest_{name}", (FlashTest,), {
@@ -109,19 +119,40 @@ def _make_flash_item(region: dict):
     )
 
 
+def _region_active(r: dict) -> bool:
+    """Region muncul di list kecuali optional=true dan file kosong."""
+    if r.get("optional") and not r.get("file", "").strip():
+        return False
+    return True
+
+
 def load_flash_tests() -> list:
     """
-    Baca flash.json dan kembalikan list TestItem — satu per region.
-    Pasangan module_name untuk tasks.json: "flash:<name>".
+    Baca flash.json dan kembalikan list TestItem.
+    Region optional yang file-nya kosong diabaikan.
+    Region wajib (boot, app) selalu muncul.
     """
     cfg = _read_flash_json()
-    return [_make_flash_item(r) for r in cfg.get("regions", [])]
+    return [_make_flash_item(r) for r in cfg.get("regions", [])
+            if _region_active(r)]
 
 
 def flash_module_names() -> list[str]:
-    """Kembalikan ["flash:boot", "flash:app", ...] sesuai urutan di flash.json."""
+    """Kembalikan ["flash:boot", "flash:app", ...] untuk SEMUA region (termasuk yang belum dikonfigurasi).
+    Dipakai untuk tampilan di Add Test dialog. Gunakan load_flash_tests_named() untuk yang sudah dikonfigurasi."""
     cfg = _read_flash_json()
     return [f"flash:{r['name']}" for r in cfg.get("regions", [])]
+
+
+def load_flash_tests_named() -> list[tuple]:
+    """Return [(TestItem, 'flash:name'), ...] sesuai aturan _region_active().
+    Dipakai oleh Add Test dialog agar pairing item↔name selalu benar."""
+    cfg = _read_flash_json()
+    return [
+        (_make_flash_item(r), f"flash:{r['name']}")
+        for r in cfg.get("regions", [])
+        if _region_active(r)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -297,6 +328,145 @@ def tm81_module_names() -> list:
     return [f"tm81:{e['name']}" for e in cfg.get("tests", []) if _tm81_enabled(e)]
 
 
+def tm81_label() -> str:
+    """Derive label dari field 'label' di tm81_test.json, atau fallback ke nama file.
+    Contoh: file = tm81_test.json → "TM81 Test" (kecuali ada field label di JSON).
+    """
+    cfg = _read_tm81_json()
+    if cfg.get("label"):
+        return cfg["label"]
+    stem = os.path.splitext(os.path.basename(_TM81_JSON))[0]
+    return stem.replace("_", " ").title()
+
+
+# ---------------------------------------------------------------------------
+# TM81 Flash helpers  (sama sistemnya dengan TM81, prefix "tm81_ota:")
+# ---------------------------------------------------------------------------
+
+def _read_tm81_ota_json() -> dict:
+    """Baca tm81_ota.json. Return {} jika tidak ada."""
+    try:
+        with open(_TM81_OTA_JSON) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+class _TM81FlashStep(TestBase):
+    """
+    Wrapper TestBase untuk satu langkah TM81 Flash.
+    Memungkinkan TestController meng-inject progress_cb via set_progress_cb()
+    (diperlukan untuk tipe 'progress' / ProgressBarTest).
+    """
+    def __init__(self, cmd_cls, conn: str, params: dict, post_wait: float = 0.0):
+        super().__init__()
+        self._cmd_cls   = cmd_cls
+        self._conn      = conn
+        self._params    = params
+        self._post_wait = post_wait
+
+    def run(self) -> str:
+        import time as _t
+        p = dict(self._params)
+        if self._progress_cb:
+            p["progress_cb"] = self.report_progress
+        try:
+            result = self._cmd_cls(conn=self._conn, params=p).execute()
+        except Exception as e:
+            _log.exception("TM81 Flash step exception:")
+            return f"NG:{e}"
+        if result == "OK" and self._post_wait > 0:
+            _t.sleep(self._post_wait)
+        return result
+
+
+def _make_tm81_ota_item(entry: dict, cfg: dict):
+    """
+    Buat satu TestItem untuk satu langkah TM81 Flash dari tm81_ota.json -> tests.
+    Sama polanya dengan _make_tm81_item, tapi inject fw_config dari top-level.
+    """
+    import importlib as _imp, sys as _sys
+
+    name       = entry.get("name", "unknown")
+    label      = entry.get("label", name)
+    desc       = entry.get("description", "")
+    ttype      = entry.get("type", "auto").lower()
+    class_path = entry.get("command_class", "")
+    post_wait  = float(entry.get("post_wait_s", 0.0))
+
+    # Fixed OTA params dari commissioning.json["ota"]
+    comm_ota   = _read_commissioning_json().get("ota", {})
+    conn       = comm_ota.get("connection",    "ch340")
+    chunk_size = comm_ota.get("chunk_size",    512)
+    fill_ff    = comm_ota.get("fill_with_ff",  False)
+
+    # fw_dir dari flash.json["flash_dir"] (sama folder firmware)
+    flash_cfg  = _read_flash_json()
+    fw_dir     = os.path.join(_ROOT, flash_cfg.get("flash_dir", "firmware"))
+
+    # fw_version dari tm81_ota.json (user-configurable)
+    fw_version = cfg.get("fw_version", "")
+    fw_path    = os.path.join(fw_dir, fw_version) if fw_version else ""
+
+    # Params: fw config (base) + entry["params"] (override, misal skip_set_rdy)
+    params = {"fw_path": fw_path, "chunk_size": chunk_size, "fill_with_ff": fill_ff}
+    params.update(entry.get("params", {}))
+
+    # Load command class (sama dengan _make_tm81_item)
+    _cmd_cls  = None
+    _load_err = ""
+    if class_path:
+        try:
+            if _ROOT not in _sys.path:
+                _sys.path.insert(0, _ROOT)
+            mod_path, cls_name = class_path.rsplit(".", 1)
+            mod      = _imp.import_module(mod_path)
+            _cmd_cls = getattr(mod, cls_name)
+        except Exception as e:
+            _load_err = str(e)
+
+    if _cmd_cls is None:
+        def _err_fn(): return f"NG:{_load_err or 'command_class tidak diset'}"
+        return AutoTest(title=label, command=f"TM81_FLASH_{name.upper()}",
+                        description=desc, run_fn=_err_fn)
+
+    # Bungkus dalam _TM81FlashStep agar progress_cb bisa di-inject
+    instance = _TM81FlashStep(_cmd_cls, conn, params, post_wait)
+    kw = dict(title=label, command=f"TM81_FLASH_{name.upper()}",
+              description=desc, run_fn=instance.run)
+
+    if ttype == "progress":
+        return ProgressBarTest(**kw,
+                               steps=entry.get("steps", 50),
+                               step_ms=entry.get("step_ms", 200))
+    else:
+        return AutoTest(**kw)
+
+
+def load_tm81_ota_tests() -> list:
+    """Baca tm81_ota.json dan kembalikan list TestItem — satu per langkah."""
+    cfg = _read_tm81_ota_json()
+    return [_make_tm81_ota_item(e, cfg) for e in cfg.get("tests", [])]
+
+
+def tm81_ota_module_names() -> list[str]:
+    """Kembalikan ["tm81_ota:app_goto_bl", "tm81_ota:bl_prepare", ...] sesuai urutan."""
+    cfg = _read_tm81_ota_json()
+    return [f"tm81_ota:{e['name']}" for e in cfg.get("tests", []) if "name" in e]
+
+
+def tm81_ota_label() -> str:
+    """Derive label tampilan dari field 'label' di tm81_ota.json, atau fallback ke nama file.
+    Contoh: file = tm81_ota.json, field label = "TM81 OTA" → return "TM81 OTA".
+    """
+    cfg = _read_tm81_ota_json()
+    if cfg.get("label"):
+        return cfg["label"]
+    # Fallback: derive dari nama file → "tm81_ota" → "TM81 OTA"
+    stem = os.path.splitext(os.path.basename(_TM81_OTA_JSON))[0]
+    return stem.replace("_", " ").title()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -393,6 +563,14 @@ def load_test(module_name: str):
             if r.get("name") == region_name:
                 return _make_flash_item(r)
         raise KeyError(f"Flash region '{region_name}' tidak ditemukan di flash.json")
+
+    if module_name.startswith("tm81_ota:"):
+        entry_name = module_name[len("tm81_ota:"):]
+        cfg = _read_tm81_ota_json()
+        for e in cfg.get("tests", []):
+            if e.get("name") == entry_name:
+                return _make_tm81_ota_item(e, cfg)
+        raise KeyError(f"TM81 Flash step '{entry_name}' tidak ditemukan di tm81_ota.json")
 
     # Modul biasa dari folder tests/
     mod = importlib.import_module(f"tests.{module_name}")

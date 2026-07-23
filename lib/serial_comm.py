@@ -322,7 +322,8 @@ class SerialComm:
     on_disconnect(fn) : dipanggil saat disconnect / port hilang
     """
 
-    def __init__(self, config: SerialConfig, parser: BaseParser):
+    def __init__(self, config: SerialConfig, parser: BaseParser,
+                 conn_name: str = ""):
         self._config   = config
         self._parser   = parser
         self._port: Optional[serial.Serial] = None
@@ -334,6 +335,10 @@ class SerialComm:
         self._cb_disconnect: list[Callable] = []
         self._lock           = threading.Lock()
         self._disconnected   = False
+
+        # Logger per-koneksi: serial_comm.<conn_name> atau serial_comm
+        self._log = (logging.getLogger(f"serial_comm.{conn_name}")
+                     if conn_name else log)
 
         self._parser.set_frame_callback(self._on_frame)
 
@@ -359,7 +364,7 @@ class SerialComm:
         if port is None:
             port = self.find_port()
         if port is None:
-            log.warning("Port tidak ditemukan untuk device: %s", self._config.device_name)
+            self._log.warning("Port tidak ditemukan untuk device: %s", self._config.device_name)
             return False
         try:
             self._port = serial.Serial(
@@ -374,7 +379,7 @@ class SerialComm:
                 dsrdtr   = self._config.dsrdtr,
             )
         except serial.SerialException as e:
-            log.error("Gagal buka port %s: %s", port, e)
+            self._log.error("Gagal buka port %s: %s", port, e)
             return False
 
         self._stop_evt.clear()
@@ -383,7 +388,7 @@ class SerialComm:
 
         for fn in self._cb_connect:
             fn(port)
-        log.info("Terhubung ke %s", port)
+        self._log.info("Terhubung ke %s", port)
         return True
 
     def disconnect(self):
@@ -425,7 +430,7 @@ class SerialComm:
             self._port.write(raw)
             return True
         except serial.SerialException as e:
-            log.error("Gagal kirim: %s", e)
+            self._log.error("Gagal kirim: %s", e)
             return False
 
     # ------------------------------------------------------------------
@@ -463,7 +468,7 @@ class SerialComm:
                     for b in data:
                         self._parser.feed(bytes([b]))
             except serial.SerialException as e:
-                log.warning("Reader error: %s", e)
+                self._log.warning("Reader error: %s", e)
                 break
         # Pastikan port ditutup dan di-clear agar is_connected() return False
         try:

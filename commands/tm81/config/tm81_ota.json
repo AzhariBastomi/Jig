@@ -1,0 +1,43 @@
+{
+  "_doc": "Konfigurasi OTA Flash TM81. Hanya fw_version yang perlu diubah sebelum flash.",
+  "label": "TM81 OTA",
+  "fw_version": "KG200Zv020.bin",
+  "_doc_tests": "Urutan 4 langkah OTA. Setiap entry = 1 test row di UI. type: auto/progress. post_wait_s: jeda setelah step selesai.",
+  "tests": [
+    {
+      "name": "app_goto_bl",
+      "label": "App to Bootloader",
+      "command_class": "commands.tm81.app_goto_bl.AppGotoBL",
+      "type": "auto",
+      "post_wait_s": 1.5,
+      "description": "Reboot device dari App ke mode Bootloader via IrDA"
+    },
+    {
+      "name": "bl_prepare",
+      "label": "BL Prepare",
+      "command_class": "commands.tm81.bl_prepare.BLPrepare",
+      "type": "auto",
+      "description": "Kirim ukuran firmware + CRC32MPEG2 ke bootloader (BL_SET_RDY)"
+    },
+    {
+      "name": "write_fw",
+      "label": "Write Firmware",
+      "command_class": "commands.tm81.bl_write_firmware.BLWriteFirmware",
+      "type": "progress",
+      "params": {
+        "skip_set_rdy": true,
+        "skip_goto_app": true
+      },
+      "steps": 50,
+      "step_ms": 200,
+      "description": "Transfer chunk firmware ke bootloader (BL_FW_DATA)"
+    },
+    {
+      "name": "bl_goto_app",
+      "label": "Bootloader to App",
+      "command_class": "commands.tm81.bl_goto_app.BLGotoApp",
+      "type": "auto",
+      "description": "Perintahkan bootloader lompat ke App (BL_GOTO_APP)"
+    }
+  ]
+}
