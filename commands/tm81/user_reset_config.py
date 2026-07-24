@@ -21,7 +21,7 @@ class UserResetConfig(TM81Command):
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
         _log.debug("  User Reset Config → OK")
-        return "OK"
+        return "OK:config direset ke default"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

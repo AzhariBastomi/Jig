@@ -25,6 +25,7 @@ class TestItem:
     command:     str
     description: str = ""
     run_fn:      object = field(default=None)          # callable() -> "OK"|"NG", opsional
+    validate_fn: object = field(default=None)          # callable() -> None|"NG:..." — cek sebelum kirim
     no_retry:    bool = field(default=False)           # True = skip outer retry
     test_type:   TestType = field(default=TestType.AUTO, init=False)
     result:      TestResult = field(default=TestResult.PENDING, init=False)

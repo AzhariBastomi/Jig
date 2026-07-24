@@ -22,10 +22,10 @@ class WdtTest(TM81Command):
         # Device reset setelah WDT, ACK atau timeout dua-duanya normal
         if result.error in ("ACK", "Timeout"):
             _log.debug("  WDT Test → device akan reset (normal)")
-            return "OK"
+            return "OK:WDT triggered — device akan reset"
         if not result.valid:
             return f"NG:{result.error}"
-        return "OK"
+        return "OK:WDT triggered — device akan reset"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

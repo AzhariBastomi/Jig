@@ -21,21 +21,21 @@ class CommissioningDialog(tk.Toplevel):
 
     _JSON_PATH = os.path.join(_ROOT, "commands", "tm81", "config", "commissioning.json")
 
-    _JOIN_MODES  = ["0 — None", "1 — ABP", "2 — OTAA"]
-    _DEV_CLASSES = ["0 — Class A", "1 — Class B", "2 — Class C"]
-    _COUNTER_RES = ["0 — 1 L", "1 — 10 L", "2 — 100 L"]
-    _SUBMIT_IDS  = [
-        "0 — 30 menit", "1 — 1 jam", "2 — 3 jam",
-        "3 — 12 jam",   "4 — 1 hari", "5 — 3 hari", "6 — 7 hari",
-    ]
-    _MSG_TYPES = ["0 — Unconfirmed", "1 — Confirmed"]
+    _JOIN_MODES  = ["None", "ABP", "OTAA"]
+    _DEV_CLASSES = ["Class A", "Class B", "Class C"]
+    _COUNTER_RES = ["1 L", "10 L", "100 L"]
+    _SUBMIT_IDS  = ["30 menit", "1 jam", "3 jam", "12 jam", "1 hari", "3 hari", "7 hari"]
+    _MSG_TYPES   = ["Unconfirmed", "Confirmed"]
+    _TIMEZONES   = ["WIB (GMT+7)", "WITA (GMT+8)", "WIT (GMT+9)"]
+    _TZ_VALUES   = [7, 8, 9]
 
-    def __init__(self, parent):
+    def __init__(self, parent, on_save=None):
         super().__init__(parent)
         self.title("Commissioning Settings")
         self.resizable(False, False)
         self.grab_set()
 
+        self._on_save_cb = on_save
         self._data = self._load()
         self._vars: dict[str, tk.Variable] = {}
         self._build()
@@ -126,7 +126,25 @@ class CommissioningDialog(tk.Toplevel):
             cb.current(idx if 0 <= idx < len(choices) else 0)
             cb.pack(side="left", padx=(0, 8), pady=4)
             cb.bind("<<ComboboxSelected>>",
-                    lambda e, v=var, c=cb: v.set(int(c.get().split("—")[0].strip())))
+                    lambda e, v=var, c=cb, ch=choices: v.set(ch.index(c.get())))
+            self._vars[key] = var
+
+        def _combo_val(parent, key, label, choices, values, current_value):
+            """Combo yang menyimpan nilai aktual (values[i]), bukan index-nya —
+            dipakai saat urutan pilihan tidak sama dengan 0,1,2,... (mis. timezone 7/8/9)."""
+            idx = values.index(current_value) if current_value in values else 0
+            var = tk.IntVar(value=values[idx])
+            row = tk.Frame(parent, bg=surf)
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=label, bg=surf, fg=C["sub"],
+                     font=("TkDefaultFont", fs("small")),
+                     width=17, anchor="w").pack(side="left", padx=(8, 4))
+            cb = ttk.Combobox(row, values=choices, state="readonly", width=22,
+                              font=("TkDefaultFont", fs("small")))
+            cb.current(idx)
+            cb.pack(side="left", padx=(0, 8), pady=4)
+            cb.bind("<<ComboboxSelected>>",
+                    lambda e, v=var, c=cb, ch=choices, vals=values: v.set(vals[ch.index(c.get())]))
             self._vars[key] = var
 
         def _sep(parent, title):
@@ -142,7 +160,7 @@ class CommissioningDialog(tk.Toplevel):
         _entry(lk, "join_eui", "JoinEUI",       _get("lora_set_join_eui.join_eui", "0000000000000001"),             width=20, mono=True)
         _entry(lk, "app_key",  "AppKey",        _get("lora_set_app_key.app_key",   "8833E75406D203F48D1F6D2CCC2815D8"), width=36, mono=True)
         _entry(lk, "nw_key",   "NwKey (ABP)",   _get("lora_set_nw_key.nw_key",     "00000000000000000000000000000001"), width=36, mono=True)
-        _entry(lk, "dev_addr", "DevAddr (ABP)", _get("lora_set_dev_addr.dev_addr", 1), width=10)
+        _entry(lk, "dev_addr", "DevAddr (ABP)", _get("lora_set_dev_addr.dev_addr", "0x0100000B"), width=12, mono=True)
 
         t2 = _tab("LoRa Settings")
         ls = tk.Frame(t2, bg=surf)
@@ -162,7 +180,8 @@ class CommissioningDialog(tk.Toplevel):
         _combo(uc, "counter_res",  "Counter Res",   self._COUNTER_RES, _get("user_set_config.counter_res", 1))
         _combo(uc, "submit_id",    "Submit Rate",   self._SUBMIT_IDS,  _get("user_set_config.submit_id",  0))
         _combo(uc, "msg_type",     "Message Type",  self._MSG_TYPES,   _get("user_set_config.msg_type",   1))
-        _entry(uc, "timezone",        "Timezone (GMT+)", _get("user_set_config.timezone",        7), width=6)
+        _combo_val(uc, "timezone", "Timezone", self._TIMEZONES, self._TZ_VALUES,
+                   _get("user_set_config.timezone", 7))
         _entry(uc, "initial_counter", "Initial Counter", _get("user_set_config.initial_counter", 0), width=10)
 
         btn_frame = tk.Frame(self, bg=bg, pady=10)
@@ -203,11 +222,24 @@ class CommissioningDialog(tk.Toplevel):
         app_key  = _hex("app_key",  16)
         nw_key   = _hex("nw_key",   16)
 
+        # DevAddr: terima "0x..." atau plain hex string → simpan sebagai "0xXXXXXXXX"
+        try:
+            _da_raw = v["dev_addr"].get().strip().replace(" ", "")
+            if _da_raw.lower().startswith("0x"):
+                dev_addr_int = int(_da_raw, 16)
+            else:
+                dev_addr_int = int(_da_raw, 16)
+            dev_addr_str = f"0x{dev_addr_int:08X}"
+        except (ValueError, AttributeError):
+            dev_addr_int = None
+            dev_addr_str = None
+
         errors = []
-        if dev_eui  is None: errors.append("DevEUI harus 16 karakter hex (8 bytes)")
-        if join_eui is None: errors.append("JoinEUI harus 16 karakter hex (8 bytes)")
-        if app_key  is None: errors.append("AppKey harus 32 karakter hex (16 bytes)")
-        if nw_key   is None: errors.append("NwKey harus 32 karakter hex (16 bytes)")
+        if dev_eui      is None: errors.append("DevEUI harus 16 karakter hex (8 bytes)")
+        if join_eui     is None: errors.append("JoinEUI harus 16 karakter hex (8 bytes)")
+        if app_key      is None: errors.append("AppKey harus 32 karakter hex (16 bytes)")
+        if nw_key       is None: errors.append("NwKey harus 32 karakter hex (16 bytes)")
+        if dev_addr_str is None: errors.append("DevAddr harus hex 8 digit (contoh: 0x0100000B)")
         if errors:
             messagebox.showerror("Validasi gagal", "\n".join(errors), parent=self)
             return
@@ -216,23 +248,25 @@ class CommissioningDialog(tk.Toplevel):
             "_doc": "Parameter commissioning per batch produksi.",
             "set_id": {"_doc": "Device ID dari field UI", "device_id": "@device_id"},
             "lora_set_join_mode":  {"_doc": "0=None,1=ABP,2=OTAA",             "join_mode":  int(v["join_mode"].get())},
-            "lora_set_dev_class":  {"_doc": "0=A,1=B,2=C",                     "dev_class":  int(v["dev_class"].get())},
+            "lora_set_dev_class":  {"_doc": "0=ClassA,1=ClassB,2=ClassC",      "dev_class":  int(v["dev_class"].get())},
             "lora_set_dev_eui":    {"_doc": "8 bytes hex, unik per device",     "dev_eui":    dev_eui},
             "lora_set_join_eui":   {"_doc": "8 bytes hex, sama per batch",      "join_eui":   join_eui},
             "lora_set_app_key":    {"_doc": "16 bytes hex, OTAA",               "app_key":    app_key},
             "lora_set_nw_key":     {"_doc": "16 bytes hex, ABP NwkSKey",        "nw_key":     nw_key},
-            "lora_set_dev_addr":   {"_doc": "integer 4-byte, ABP",              "dev_addr":   _int("dev_addr", 1)},
+            "lora_set_dev_addr":   {"_doc": "hex string 4-byte, ABP",           "dev_addr":   dev_addr_str},
             "lora_set_config":     {"_doc": "tx_power/data_rate/rx1_delay",
                                     "tx_power": _int("tx_power", 0), "data_rate": _int("data_rate", 2), "rx1_delay": _int("rx1_delay", 2)},
             "user_set_config":     {"_doc": "counter_res/submit_id/timezone/msg_type",
                                     "activation": 1, "initial_counter": _int("initial_counter", 0),
                                     "counter_res": int(v["counter_res"].get()), "alarm": 0,
-                                    "submit_id": int(v["submit_id"].get()), "timezone": _int("timezone", 7),
+                                    "submit_id": int(v["submit_id"].get()), "timezone": int(v["timezone"].get()),
                                     "msg_type": int(v["msg_type"].get())},
         }
 
         try:
             self._save(data)
             self.destroy()
+            if self._on_save_cb:
+                self._on_save_cb()
         except Exception as e:
             messagebox.showerror("Gagal simpan", str(e), parent=self)

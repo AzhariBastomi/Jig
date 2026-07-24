@@ -16,7 +16,7 @@ class IrdaDisable(TM81Command):
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug("  IrDA Disable → OK")
-        return "OK"
+        return "OK:IrDA dinonaktifkan"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

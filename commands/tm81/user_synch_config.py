@@ -21,7 +21,7 @@ class UserSynchConfig(TM81Command):
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
         _log.debug("  User Sync Config → OK")
-        return "OK"
+        return "OK:config disinkronisasi"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

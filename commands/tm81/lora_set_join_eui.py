@@ -16,15 +16,21 @@ class LoraSetJoinEui(TM81Command):
     def __init__(self, conn=None, timeout=None, params=None):
         super().__init__(conn, timeout)
         p = params or {}
-        eui_hex = p.get("join_eui", self.DEFAULT_JOIN_EUI.hex())
-        self._join_eui = bytes.fromhex(eui_hex)
+        raw = p.get("join_eui", self.DEFAULT_JOIN_EUI.hex())
+        raw = str(raw).strip().replace(":", "").replace(" ", "")
+        try:
+            self._join_eui = bytes.fromhex(raw) if raw else b""
+        except ValueError:
+            self._join_eui = b""
 
     def execute(self) -> str:
+        if len(self._join_eui) != 8:
+            return f"NG:JoinEUI harus 8 bytes (16 hex) - sekarang {len(self._join_eui)} bytes. Cek Commissioning Settings."
         result = self.xfer(CmdId.SET_JOIN_EUI, self._join_eui)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug(f"  Set JoinEUI={self._join_eui.hex(':')} → OK")
-        return "OK"
+        return f"OK:JoinEUI={self._join_eui.hex(':').upper()}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

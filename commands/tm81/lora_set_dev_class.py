@@ -27,7 +27,7 @@ class LoraSetDevClass(TM81Command):
             return f"NG:{result.error}"
         names = {0: "A", 1: "B", 2: "C"}
         _log.debug(f"  Set DevClass={names.get(self._cls, self._cls)} → OK")
-        return "OK"
+        return f"OK:Class {names.get(self._cls, self._cls)}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

@@ -16,15 +16,21 @@ class LoraSetAppKey(TM81Command):
     def __init__(self, conn=None, timeout=None, params=None):
         super().__init__(conn, timeout)
         p = params or {}
-        key_hex = p.get("app_key", self.DEFAULT_APP_KEY.hex())
-        self._app_key = bytes.fromhex(key_hex)
+        raw = p.get("app_key", self.DEFAULT_APP_KEY.hex())
+        raw = str(raw).strip().replace(":", "").replace(" ", "")
+        try:
+            self._app_key = bytes.fromhex(raw) if raw else b""
+        except ValueError:
+            self._app_key = b""
 
     def execute(self) -> str:
+        if len(self._app_key) != 16:
+            return f"NG:AppKey harus 16 bytes (32 hex) - sekarang {len(self._app_key)} bytes. Cek Commissioning Settings."
         result = self.xfer(CmdId.SET_APP_KEY, self._app_key)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug(f"  Set AppKey={self._app_key.hex(':')} → OK")
-        return "OK"
+        return f"OK:AppKey={self._app_key.hex(':').upper()}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

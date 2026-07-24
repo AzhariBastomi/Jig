@@ -16,7 +16,7 @@ class StandbyMode(TM81Command):
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug("  Standby Mode → OK")
-        return "OK"
+        return "OK:device masuk standby"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

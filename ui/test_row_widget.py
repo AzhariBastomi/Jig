@@ -312,6 +312,7 @@ class TestRowWidget:
             self._pct = 0
             self._draw_bar()
             self._pct_lbl.config(text="0%", fg=COLORS["sub"])
+        self.refresh_validation()
 
     def destroy(self):
         self.frame.destroy()
@@ -418,7 +419,34 @@ class TestRowWidget:
         self._badge.config(bg=BADGE_BG[r], fg=BADGE_FG)
 
     def _request_run(self):
+        fn = getattr(self.test_item, "validate_fn", None)
+        if fn:
+            err = fn()
+            if err:
+                msg = err[3:].strip() if err.upper().startswith("NG:") else err
+                self.set_result(TestResult.NG, error=msg)
+                return
         self.on_run_request(self)
+
+    def refresh_validation(self):
+        """Cek validate_fn tanpa menjalankan test — dipakai untuk enable/disable
+        tombol Run secara real-time (mis. saat field Device ID diketik)."""
+        t = self.test_item.test_type
+        if t not in (TestType.PROGRESS, TestType.AUTO):
+            return
+        if self.test_item.result != TestResult.PENDING:
+            return  # jangan ganggu tampilan saat running / sudah selesai
+        fn = getattr(self.test_item, "validate_fn", None)
+        if not fn:
+            return
+        err = fn()
+        if err:
+            msg = err[3:].strip() if err.upper().startswith("NG:") else err
+            self._run_btn.config(state="disabled")
+            self._status_lbl.config(text=msg, fg=COLORS["warn"])
+        else:
+            self._run_btn.config(state="normal")
+            self._status_lbl.config(text="", fg=COLORS["sub"])
 
     def _manual_result(self, result):
         print(f"[widget] _manual_result: {self.test_item.title} -> {result}", flush=True)

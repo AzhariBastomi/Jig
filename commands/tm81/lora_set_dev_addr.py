@@ -16,15 +16,23 @@ class LoraSetDevAddr(TM81Command):
     def __init__(self, conn=None, timeout=None, params=None):
         super().__init__(conn, timeout)
         p = params or {}
-        self._dev_addr = p.get("dev_addr", self.DEFAULT_DEV_ADDR)
+        raw = p.get("dev_addr", self.DEFAULT_DEV_ADDR)
+        # Terima int, "0xABCD1234", atau plain hex string
+        if isinstance(raw, str):
+            raw = raw.strip()
+            self._dev_addr = int(raw, 16) if raw.lower().startswith("0x") else int(raw, 16)
+        else:
+            self._dev_addr = int(raw)
 
     def execute(self) -> str:
+        if self._dev_addr == 0:
+            return "NG:DevAddr tidak boleh 0x00000000. Cek Commissioning Settings."
         data = self._dev_addr.to_bytes(4, "little")
         result = self.xfer(CmdId.SET_DEV_ADDR, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug(f"  Set DevAddr=0x{self._dev_addr:08X} → OK")
-        return "OK"
+        return f"OK:DevAddr=0x{self._dev_addr:08X}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

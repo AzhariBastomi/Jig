@@ -94,9 +94,23 @@ class TM81Command:
         comm.off_data(_on_data)
 
         if result[0] is None:
-            return ParseResult(raw=b"", payload=b"", valid=False, error="Timeout")
+            pr = ParseResult(raw=b"", payload=b"", valid=False, error="Timeout")
+        else:
+            pr = result[0]
 
-        return result[0]
+        # Log hasil parsing ke serial_comm logger agar tampil di CH340 debug window
+        _log = getattr(comm._parser, "_log", None)
+        if _log is not None:
+            if not pr.valid:
+                _log.debug("[TM81 RESULT] NG  error=%r", pr.error)
+            elif pr.error == "ACK":
+                _log.debug("[TM81 RESULT] OK  ACK (no payload)")
+            else:
+                plen = len(pr.payload)
+                phex = pr.payload.hex(" ") if plen else "—"
+                _log.debug("[TM81 RESULT] OK  payload(%dB): %s", plen, phex)
+
+        return pr
 
     def execute(self) -> str:
         raise NotImplementedError

@@ -27,7 +27,7 @@ class LoraSetJoinMode(TM81Command):
             return f"NG:{result.error}"
         names = {0: "None", 1: "ABP", 2: "OTAA"}
         _log.debug(f"  Set JoinMode={names.get(self._mode, self._mode)} → OK")
-        return "OK"
+        return f"OK:JoinMode={names.get(self._mode, self._mode)}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

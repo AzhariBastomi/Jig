@@ -94,11 +94,17 @@ class App(tk.Tk):
 
         self._load_tasks()
 
-        self.geometry(f"{self._display_w}x{self._display_h}")
+        self._center_on_screen(self._display_w, self._display_h)
         self.minsize(320, 240)
         self.resizable(self._preset == "Custom", self._preset == "Custom")
 
         self._build()
+        # Daftarkan root + watcher agar command (mis. dev_get_id) bisa update UI
+        test_loader.set_tk_root(self)
+        test_loader.watch_context(
+            "device_id",
+            lambda v: (self._device_var.set(v), self._list_panel.refresh_validations()),
+        )
         self._refresh_dynamic_buttons()
         self.after(500, self._auto_connect)
         self.after(200, self._maybe_open_debug_console)
@@ -106,6 +112,14 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
     # Tkinter error handler
     # ------------------------------------------------------------------
+
+    def _center_on_screen(self, w: int, h: int):
+        """Set ukuran window dan posisikan di tengah layar."""
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        x  = max(0, (sw - w) // 2)
+        y  = max(0, (sh - h) // 2)
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _on_tk_error(self, exc_type, exc_val, exc_tb):
         import traceback
@@ -182,6 +196,7 @@ class App(tk.Tk):
             lambda *_: (
                 test_loader.update_context({"device_id": self._device_var.get()}),
                 self._update_start_btn(),
+                self._list_panel.refresh_validations() if hasattr(self, "_list_panel") else None,
             ),
         )
         _dev_entry = tk.Entry(
@@ -256,6 +271,7 @@ class App(tk.Tk):
         )
         self._list_panel.pack(fill="both", expand=True, padx=10, pady=(0, 8))
         self._list_panel.load_tests(self._tests)
+        self._list_panel.refresh_validations()
         self._refresh_dynamic_buttons()
         self._update_start_btn()
 
@@ -590,7 +606,7 @@ class App(tk.Tk):
         self._update_debug_btn()
 
     def _open_commissioning(self):
-        CommissioningDialog(self)
+        CommissioningDialog(self, on_save=self._list_panel.refresh_validations)
 
     def _get_active_flash_project(self) -> str:
         """Deteksi flash project aktif dari test names (format 'flash:proj:region')."""
@@ -695,7 +711,8 @@ class App(tk.Tk):
                 "Konflik Project",
                 f"Project aktif: {self._project.upper()}\n"
                 f"Tidak bisa menambahkan modul project {new_proj.upper()}.\n"
-                f"Hapus semua test {self._project.upper()} terlebih dahulu."
+                f"Hapus semua test {self._project.upper()} terlebih dahulu.",
+                parent=self,
             )
             return
 
@@ -711,6 +728,7 @@ class App(tk.Tk):
                 self._keepalive.stop()
 
         self._list_panel.load_tests(self._tests)
+        self._list_panel.refresh_validations()
         self._refresh_dynamic_buttons()
         self._update_start_btn()
         self._save_tasks()
@@ -748,7 +766,7 @@ class App(tk.Tk):
     def _clear_all(self):
         if not self._tests:
             return
-        if messagebox.askyesno("Clear All", "Hapus semua test dari list?"):
+        if messagebox.askyesno("Clear All", "Hapus semua test dari list?", parent=self):
             self._reset_project_config(self._project or "")
             self._tests.clear()
             self._test_names.clear()

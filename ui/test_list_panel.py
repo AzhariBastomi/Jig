@@ -81,6 +81,12 @@ class TestListPanel(tk.Frame):
         for row in self._rows:
             row.reset()
 
+    def refresh_validations(self):
+        """Panggil ulang validate_fn tiap row (mis. saat context device_id berubah)
+        agar tombol Run ikut ter-enable/disable secara real-time."""
+        for row in self._rows:
+            row.refresh_validation()
+
     def scroll_to_row(self, row: TestRowWidget):
         self._inner.update_idletasks()
         try:

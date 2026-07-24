@@ -32,7 +32,7 @@ class LoraSetConfig(TM81Command):
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug(f"  Set LoRa Config: TxPwr={self._tx_power} DR={self._data_rate} RX1Delay={self._rx1_delay}s → OK")
-        return "OK"
+        return f"OK:TxPwr={self._tx_power} DR={self._data_rate} RX1Delay={self._rx1_delay}s"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

@@ -54,6 +54,25 @@ from test_modules import ProgressBarTest, ManualTest, AutoTest
 context: dict = {}
 _context_lock = threading.Lock()
 
+# UI watcher — callback dipanggil di main thread saat context berubah.
+# Register via watch_context(); set root via set_tk_root().
+_tk_root   = None
+_ui_watchers: dict = {}   # key → list[callable]
+
+
+def set_tk_root(root) -> None:
+    """Simpan referensi ke root Tk window (dipanggil sekali dari main.py)."""
+    global _tk_root
+    _tk_root = root
+
+
+def watch_context(key: str, fn) -> None:
+    """
+    Register callback yang dipanggil di main thread saat context[key] berubah.
+    Gunakan ini untuk update widget Tkinter dari background thread.
+    """
+    _ui_watchers.setdefault(key, []).append(fn)
+
 
 def get_context(key: str, default: str = "") -> str:
     """Thread-safe getter untuk context."""
@@ -62,9 +81,22 @@ def get_context(key: str, default: str = "") -> str:
 
 
 def update_context(data: dict) -> None:
-    """Thread-safe update untuk context."""
+    """Thread-safe update untuk context. Notifikasi UI watcher jika nilai berubah."""
+    changed = {}
     with _context_lock:
-        context.update(data)
+        for k, v in data.items():
+            if context.get(k) != v:
+                context[k] = v
+                changed[k] = v
+    # Fire watchers di main thread — hanya untuk key yang benar-benar berubah
+    # (guard against infinite loop jika watcher juga memanggil update_context)
+    if _tk_root and changed:
+        for key, value in changed.items():
+            for fn in _ui_watchers.get(key, []):
+                try:
+                    _tk_root.after(0, lambda f=fn, v=value: f(v))
+                except Exception:
+                    pass
 
 _ROOT               = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _FLASH_JSON         = os.path.join(_ROOT, "config", "flash.json")
@@ -293,19 +325,68 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
         except Exception as _e:
             _load_err = str(_e)
 
+    _ch340 = logging.getLogger("serial_comm.ch340")
+
     def _run_fn():
         if _cmd_cls is None:
             return f"NG:{_load_err or 'command_class tidak diset'}"
         try:
             params = _resolve_params()
             _log.info("[TEST] %s", label)
-            return _cmd_cls(params=params).execute()
+            result = _cmd_cls(params=params).execute()
+            # Log parsed result ke CH340 debug window
+            r = str(result).strip()
+            if r.upper().startswith("OK:"):
+                first_line = r[3:].split("\n")[0].strip()
+                _ch340.debug("[TM81 PARSED] OK  %s", first_line)
+            elif not (r.upper() == "OK"):
+                _ch340.debug("[TM81 PARSED] %s", r.split("\n")[0])
+            return result
         except Exception as e:
             _log.exception("[TEST] %s exception:", label)
+            _ch340.debug("[TM81 PARSED] EXCEPTION: %s", e)
             return f"NG:{e}"
+
+    # Buat validate_fn dari "validate" key di entry
+    _validate_spec = entry.get("validate")  # e.g. {"dev_eui": 16, "dev_addr": "nonzero_hex"}
+
+    def _validate_fn(spec=_validate_spec, _name=name, _sp=static_params):
+        if not spec:
+            return None
+        import json as _json
+        try:
+            with open(_COMMISSIONING_JSON, encoding="utf-8") as _f:
+                _cfg = _json.load(_f)
+        except Exception:
+            _cfg = {}
+        _sec = _cfg.get(_name, {})
+        for _param, _rule in spec.items():
+            _raw = _sp.get(_param)
+            if _raw is None:
+                _raw = _sec.get(_param, "")
+            if isinstance(_raw, str) and _raw.startswith("@"):
+                _raw = get_context(_raw[1:])
+            if _raw is None:
+                _raw = ""
+            _val = str(_raw).strip().replace(":", "").replace(" ", "")
+            if isinstance(_rule, int):
+                if len(_val) < _rule:
+                    if _param == "device_id":
+                        return "NG:device_id kosong — isi field 'Device ID / Serial No.' di UI"
+                    return f"NG:{_param} belum diisi (butuh {_rule} karakter). Buka Commissioning Settings."
+            elif _rule == "nonzero_hex":
+                _int = 0
+                try:
+                    _int = int(_val, 16) if _val else 0
+                except ValueError:
+                    pass
+                if _int == 0:
+                    return f"NG:{_param} tidak boleh 0. Buka Commissioning Settings."
+        return None
 
     kw = dict(title=label, command=f"TM81_{name.upper()}",
               description=desc, run_fn=_run_fn,
+              validate_fn=_validate_fn if _validate_spec else None,
               no_retry=entry.get("no_retry", False))
 
     if ttype == "manual":

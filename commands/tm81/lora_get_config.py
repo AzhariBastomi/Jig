@@ -4,7 +4,10 @@ Response payload (57 bytes): full LoRaWAN configuration.
 """
 
 import logging
-_log = logging.getLogger(__name__)
+import os as _os
+_log   = logging.getLogger(__name__)
+_ch340 = logging.getLogger("serial_comm.ch340")
+_COMMISSIONING_JSON = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "config", "commissioning.json")
 
 try:
     from commands.tm81.base import TM81Command, CmdId
@@ -46,6 +49,7 @@ class LoraGetConfig(TM81Command):
         self._config = config
         for k, v in config.items():
             _log.debug(f"  {k}: {v}")
+        self._update_commissioning(d)
 
         summary = f"Class {config['lora_class']} | {config['join_mode']} | DR{config['data_rate']} | TxPwr {config['tx_power']}"
         detail = "\n".join([
@@ -61,6 +65,40 @@ class LoraGetConfig(TM81Command):
             f"RX1 Delay  : {config['rx1_delay']}",
         ])
         return f"OK:{summary}\n{detail}"
+
+    def _update_commissioning(self, d: bytes):
+        """Tulis data yang dibaca dari device ke commissioning.json."""
+        import json
+        path = _COMMISSIONING_JSON
+        try:
+            with open(path, encoding="utf-8") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
+        cfg.setdefault("lora_set_dev_class",  {}).update({"dev_class":  d[0]})
+        cfg.setdefault("lora_set_join_mode",  {}).update({"join_mode":  d[1]})
+        cfg.setdefault("lora_set_dev_addr",   {}).update({"dev_addr":   f"0x{int.from_bytes(d[2:6], 'little'):08X}"})
+        cfg.setdefault("lora_set_dev_eui",    {}).update({"dev_eui":    d[6:14].hex().upper()})
+        cfg.setdefault("lora_set_join_eui",   {}).update({"join_eui":   d[14:22].hex().upper()})
+        if len(d) >= 38:
+            cfg.setdefault("lora_set_app_key",{}).update({"app_key":    d[22:38].hex().upper()})
+        if len(d) >= 54:
+            cfg.setdefault("lora_set_nw_key", {}).update({"nw_key":     d[38:54].hex().upper()})
+        if len(d) > 56:
+            cfg.setdefault("lora_set_config", {}).update({
+                "tx_power":  d[54],
+                "data_rate": d[55],
+                "rx1_delay": d[56],
+            })
+
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            _ch340.debug("[LORA_GET_CONFIG] commissioning.json diupdate (class=%d mode=%d eui=%s)",
+                         d[0], d[1], d[6:14].hex().upper())
+        except Exception as e:
+            _ch340.warning("[LORA_GET_CONFIG] gagal update commissioning.json: %s", e)
 
     def get_config(self) -> dict:
         return getattr(self, "_config", {})

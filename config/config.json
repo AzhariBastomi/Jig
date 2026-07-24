@@ -58,7 +58,7 @@
 
   "debug": {
     "_doc": "Debug console. enabled: 1 = buka window saat startup. windows: pilih dari [all, serial_comm, commands, flash, test_loader].",
-    "enabled": 1,
+    "enabled": 0,
     "level": "DEBUG",
     "windows": []
   }

@@ -43,8 +43,22 @@ class UserSetConfig(TM81Command):
         result = self.xfer(CmdId.USR_SET_CFG, data)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
-        _log.debug(f"  User Set Config → OK")
-        return "OK"
+        SUBMIT = {0:"30min",1:"1h",2:"3h",3:"12h",4:"1day",5:"3day",6:"7day"}
+        CRES   = {0:"1L",1:"10L",2:"100L"}
+        ACT    = {0:"Deactivated",1:"Activated"}
+        MSG    = {0:"Unconfirmed",1:"Confirmed"}
+        tz_sign = "+" if self._timezone >= 0 else ""
+        summary = (
+            f"act={ACT.get(self._activation, self._activation)} "
+            f"counter={self._counter} "
+            f"res={CRES.get(self._counter_res, self._counter_res)} "
+            f"alarm={self._alarm:#04x} "
+            f"submit={SUBMIT.get(self._submit_id, self._submit_id)} "
+            f"tz=UTC{tz_sign}{self._timezone} "
+            f"msg={MSG.get(self._msg_type, self._msg_type)}"
+        )
+        _log.debug(f"  User Set Config → OK  {summary}")
+        return f"OK:{summary}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

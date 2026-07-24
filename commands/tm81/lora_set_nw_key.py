@@ -16,15 +16,21 @@ class LoraSetNwKey(TM81Command):
     def __init__(self, conn=None, timeout=None, params=None):
         super().__init__(conn, timeout)
         p = params or {}
-        key_hex = p.get("nw_key", self.DEFAULT_NW_KEY.hex())
-        self._nw_key = bytes.fromhex(key_hex)
+        raw = p.get("nw_key", self.DEFAULT_NW_KEY.hex())
+        raw = str(raw).strip().replace(":", "").replace(" ", "")
+        try:
+            self._nw_key = bytes.fromhex(raw) if raw else b""
+        except ValueError:
+            self._nw_key = b""
 
     def execute(self) -> str:
+        if len(self._nw_key) != 16:
+            return f"NG:NwKey harus 16 bytes (32 hex) - sekarang {len(self._nw_key)} bytes. Cek Commissioning Settings."
         result = self.xfer(CmdId.SET_NW_KEY, self._nw_key)
         if not result.valid and result.error not in ("ACK",):
             return f"NG:{result.error}"
         _log.debug(f"  Set NwKey={self._nw_key.hex(':')} → OK")
-        return "OK"
+        return f"OK:NwKey={self._nw_key.hex(':').upper()}"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":

@@ -17,12 +17,24 @@ except ImportError:
 
 class LoraForceSend(TM81Command):
 
+    _ACK          = 0x11
+    _RECOVERY     = 0xE6
+
     def execute(self) -> str:
         result = self.xfer(CmdId.FORCE_SEND_LORA, timeout=10.0)
         if not result.valid and result.error != "ACK":
             return f"NG:{result.error}"
-        _log.debug("  LoRa Force Send → OK")
-        return "OK"
+
+        status = result.payload[0] if result.payload else self._ACK
+        if status == self._ACK:
+            _log.debug("  LoRa Force Send → uplink dikirim")
+            return "OK:uplink dikirim"
+        elif status == self._RECOVERY:
+            _log.debug("  LoRa Force Send → masih dalam recovery period (0xE6)")
+            return "NG:masih dalam recovery period — tunggu sebentar lalu coba lagi"
+        else:
+            _log.debug(f"  LoRa Force Send → status tidak dikenal: 0x{status:02x}")
+            return f"NG:status tidak dikenal (0x{status:02x})"
 
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
