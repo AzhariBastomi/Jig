@@ -21,6 +21,11 @@ class TestType(Enum):
 
 @dataclass
 class TestItem:
+    """Base class. Subclass menentukan perilakunya sendiri lewat override
+    (polymorphism) — kode luar (widget/controller) tidak perlu tahu jenis
+    konkretnya, cukup panggil method/atribut di sini.
+    """
+
     title:       str
     command:     str
     description: str = ""
@@ -30,6 +35,15 @@ class TestItem:
     test_type:   TestType = field(default=TestType.AUTO, init=False)
     result:      TestResult = field(default=TestResult.PENDING, init=False)
     last_error:  str = field(default="", init=False)
+
+    # Kunci pendaftaran di TEST_TYPE_REGISTRY / dipakai UI untuk memilih RowBehavior.
+    # Override di setiap subclass — dengan ini menambah tipe test baru tidak perlu
+    # menyentuh if/elif di tempat lain (widget, controller, loader).
+    type_key = "auto"
+
+    # True hanya untuk ManualTest — dipakai controller supaya tidak perlu
+    # `if test_item.test_type == TestType.MANUAL` di banyak tempat.
+    is_manual = False
 
     def reset(self):
         self.result     = TestResult.PENDING
@@ -41,6 +55,8 @@ class TestItem:
 
 @dataclass
 class ProgressBarTest(TestItem):
+    type_key = "progress"
+
     steps:   int = 5
     step_ms: int = 300
 
@@ -50,14 +66,37 @@ class ProgressBarTest(TestItem):
 
 @dataclass
 class ManualTest(TestItem):
+    type_key  = "manual"
+    is_manual = True
+
     def __post_init__(self):
         self.test_type = TestType.MANUAL
 
 
 @dataclass
 class AutoTest(TestItem):
+    type_key = "auto"
+
     def __post_init__(self):
         self.test_type = TestType.AUTO
+
+
+# ---------------------------------------------------------------------------
+# Factory Pattern — satu titik untuk membuat TestItem subclass yang tepat.
+# Menambah tipe baru = menambah 1 class + daftarkan di sini, tanpa menyentuh
+# if/elif di test_loader.py / ui / controller.
+# ---------------------------------------------------------------------------
+
+TEST_TYPE_REGISTRY = {
+    cls.type_key: cls for cls in (ProgressBarTest, ManualTest, AutoTest)
+}
+
+
+def build_test_item(type_key: str, **kwargs) -> TestItem:
+    """Factory: instansiasi TestItem subclass berdasar type_key ('auto'/'manual'/'progress').
+    Tipe tak dikenal -> fallback ke AutoTest (paling umum)."""
+    cls = TEST_TYPE_REGISTRY.get(type_key, AutoTest)
+    return cls(**kwargs)
 
 
 def build_default_tests():

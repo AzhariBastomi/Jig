@@ -14,8 +14,7 @@ if _LIB not in sys.path:
     sys.path.insert(0, _LIB)
 
 import json
-from config import COLORS
-from test_modules import TestResult, TestType
+from test_modules import TestResult
 import test_loader
 
 log = logging.getLogger("controller")
@@ -30,6 +29,15 @@ class TestController:
         self._stop_event  = threading.Event()
         self._wf          = self._load_workflow()
         self._uploader    = None   # UploaderBase instance, set by App
+
+        # Factory/Strategy registry — dipilih berdasar item.type_key, bukan
+        # if/elif per TestType. Dipakai hanya untuk item TANPA run_fn (mis.
+        # test bawaan demo); item TM81/BEXA selalu punya run_fn sendiri.
+        self._runner_registry = {
+            "progress": self._run_progress,
+            "manual":   self._run_manual,
+            "auto":     self._run_auto,
+        }
 
     @staticmethod
     def _load_workflow() -> dict:
@@ -67,13 +75,8 @@ class TestController:
             self._run_with_fn(row, done_callback)
             return
 
-        t = item.test_type
-        if t == TestType.PROGRESS:
-            self._run_progress(row, done_callback)
-        elif t == TestType.MANUAL:
-            self._run_manual(row, done_callback)
-        elif t == TestType.AUTO:
-            self._run_auto(row, done_callback)
+        runner = self._runner_registry.get(item.type_key, self._run_auto)
+        runner(row, done_callback)
 
     def _run_with_fn(self, row, done_callback):
         item = row.test_item
@@ -106,9 +109,7 @@ class TestController:
             for attempt in range(1, max_retries + 1):
                 if is_ok or self._stop_event.is_set():
                     break
-                row.master.after(0, lambda a=attempt, n=max_retries:
-                    row._status_lbl.config(
-                        text=f"Retry {a}/{n}...", fg=COLORS["running"]))
+                row.master.after(0, lambda a=attempt, n=max_retries: row.show_retry(a, n))
                 for _ in range(int(retry_delay / 0.05)):
                     if self._stop_event.is_set():
                         break
@@ -243,7 +244,7 @@ class TestController:
                 continue
 
             last_row    = row
-            is_manual   = (row.test_item.test_type == TestType.MANUAL)
+            is_manual   = row.test_item.is_manual
 
             if scroll_fn:
                 row.master.after(0, lambda r=row: scroll_fn(r))

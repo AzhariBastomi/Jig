@@ -50,7 +50,8 @@ from controllers.keepalive   import KeepaliveManager
 from controllers.test_controller import TestController
 from ui.test_list_panel      import TestListPanel
 from ui.dialogs              import DisplaySettingsDialog, AddTestDialog, CommissioningDialog, FlashSettingsDialog
-from ui.debug_console        import DebugConsole
+from ui.debug_console_manager import DebugConsoleManager
+from task_store               import TaskStore
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -70,9 +71,6 @@ log = logging.getLogger("main")
 
 class App(tk.Tk):
 
-    _TASKS_FILE    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tasks.json")
-    _TASKS_VERSION = 2
-
     def __init__(self):
         super().__init__()
         self.title(f"Test Point  v{APP_VERSION}")
@@ -89,8 +87,8 @@ class App(tk.Tk):
 
         self._controller     = TestController()
         self._keepalive      = KeepaliveManager()
-        # Key = window id ("all" / "serial_comm" / dst), Value = DebugConsole
-        self._debug_consoles : dict = {}
+        self._debug_consoles = DebugConsoleManager(self, on_change=self._update_debug_btn)
+        self._task_store     = TaskStore()
 
         self._load_tasks()
 
@@ -419,173 +417,21 @@ class App(tk.Tk):
         self._save_tasks()
 
     # ------------------------------------------------------------------
-    # Debug console
+    # Debug console — logic sebenarnya ada di DebugConsoleManager
+    # (ui/debug_console_manager.py); App cuma jadi jembatan tipis ke tombol UI.
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _load_debug_config() -> dict:
-        try:
-            path = os.path.join(os.path.dirname(__file__), "config", "config.json")
-            with open(path, encoding="utf-8") as f:
-                return json.load(f).get("debug", {})
-        except Exception:
-            return {}
-
     def _maybe_open_debug_console(self):
-        """Buka DebugConsole saat startup jika config debug.enabled = 1.
-
-        Membuka satu window per serial connection yang dikonfigurasi di
-        config.json → serial → connections, masing-masing difilter ke
-        logger 'serial_comm.<conn_name>'.
-        Selain itu bisa tambah window non-serial via debug.windows.
-        """
-        cfg = self._load_debug_config()
-        if not cfg.get("enabled", 0):
-            return
-        level = cfg.get("level", "DEBUG")
-
-        # 1. Satu window per serial connection (auto dari config.json)
-        try:
-            app_cfg_path = os.path.join(os.path.dirname(__file__),
-                                        "config", "config.json")
-            with open(app_cfg_path, encoding="utf-8") as f:
-                app_cfg = json.load(f)
-            serial_conns = app_cfg.get("serial", {}).get("connections", {})
-        except Exception:
-            serial_conns = {}
-
-        # Buka window dalam grid 2-kolom agar semua terlihat di layar.
-        # Tiap window 860×340, gap 8px → kolom: 868px, baris: 348px
-        _WIN_W = 868
-        _WIN_H = 348
-        _COLS  = 2
-        _grid_col, _grid_row = 0, 0
-
-        def _next_pos():
-            nonlocal _grid_col, _grid_row
-            pos = (40 + _grid_col * _WIN_W, 40 + _grid_row * _WIN_H)
-            _grid_col += 1
-            if _grid_col >= _COLS:
-                _grid_col = 0
-                _grid_row += 1
-            return pos
-
-        for conn_name, conn_def in serial_conns.items():
-            desc  = conn_def.get("description", conn_name)
-            key   = f"serial.{conn_name}"
-            title = f"Debug — {conn_name.upper()}  ({desc})"
-            self._open_named_debug(key, title,
-                                   name_filter=f"serial_comm.{conn_name}",
-                                   level=level, _offset=_next_pos())
-
-        # 2. Window tambahan dari debug.windows (misal "all", "commands")
-        _EXTRA = {
-            "all":          ("Debug — All Logs",    ""),
-            "commands":     ("Debug — TM81 Cmd",    "commands"),
-            "flash":        ("Debug — Flash",       "flash"),
-            "test_loader":  ("Debug — Test Loader", "test_loader"),
-        }
-        for wid in cfg.get("windows", []):
-            if wid in _EXTRA:
-                title, nf = _EXTRA[wid]
-                self._open_named_debug(wid, title, name_filter=nf, level=level,
-                                       _offset=_next_pos())
-
-    def _open_named_debug(self, key: str, title: str,
-                          name_filter: str = "", level: str = "DEBUG",
-                          _offset: tuple = None):
-        """Buka (atau fokus) satu DebugConsole window beridentitas key.
-
-        _offset = (x, y) tambahan dari posisi main window — agar windows
-        tidak bertumpuk saat banyak dibuka sekaligus.
-        """
-        existing = self._debug_consoles.get(key)
-        if existing and existing.winfo_exists():
-            existing.lift()
-            return existing
-        win = DebugConsole(self, min_level=level,
-                           title=title, name_filter=name_filter)
-        # Posisikan window relatif terhadap main window
-        if _offset:
-            try:
-                mx = self.winfo_rootx() + _offset[0]
-                my = self.winfo_rooty() + _offset[1]
-                win.geometry(f"+{mx}+{my}")
-            except Exception:
-                pass
-        self._debug_consoles[key] = win
-        self._update_debug_btn()
-        orig_close = win._on_close
-        def _on_close_hook(k=key, fn=orig_close):
-            fn()
-            self._debug_consoles.pop(k, None)
-            self._update_debug_btn()
-        win.protocol("WM_DELETE_WINDOW", _on_close_hook)
-        return win
+        self._debug_consoles.maybe_autostart()
 
     def _toggle_debug_console(self):
         """Klik 🐛 Debug — tampilkan menu pilihan window."""
-        menu = tk.Menu(self, tearoff=0,
-                       bg="#161b22", fg="#c9d1d9",
-                       activebackground="#264f78", activeforeground="white",
-                       font=("Consolas", 9))
-        cfg   = self._load_debug_config()
-        level = cfg.get("level", "DEBUG")
-
-        # --- Per-serial entries (dari config.json) ---
-        try:
-            app_cfg_path = os.path.join(os.path.dirname(__file__),
-                                        "config", "config.json")
-            with open(app_cfg_path, encoding="utf-8") as f:
-                serial_conns = json.load(f).get("serial", {}).get("connections", {})
-        except Exception:
-            serial_conns = {}
-
-        if serial_conns:
-            menu.add_command(label="── Serial ports ──", state="disabled")
-        for conn_name, conn_def in serial_conns.items():
-            desc   = conn_def.get("description", conn_name)
-            key    = f"serial.{conn_name}"
-            title  = f"Debug — {conn_name.upper()}  ({desc})"
-            nf     = f"serial_comm.{conn_name}"
-            active = key in self._debug_consoles and \
-                     self._debug_consoles[key].winfo_exists()
-            prefix = "✓ " if active else "  "
-            menu.add_command(
-                label=f"{prefix}{conn_name.upper()}  —  {desc}",
-                command=lambda k=key, t=title, f=nf, lv=level:
-                    self._open_named_debug(k, t, f, lv),
-            )
-
-        # --- Window lainnya ---
-        menu.add_separator()
-        extras = [
-            ("all",         "All logs",       ""),
-            ("commands",    "TM81 commands",  "commands"),
-            ("flash",       "Flash / STM32",  "flash"),
-            ("test_loader", "Test loader",    "test_loader"),
-        ]
-        for key, label, nf in extras:
-            active = key in self._debug_consoles and \
-                     self._debug_consoles[key].winfo_exists()
-            prefix = "✓ " if active else "  "
-            menu.add_command(
-                label=f"{prefix}{label}",
-                command=lambda k=key, t=f"Debug — {label}", f=nf, lv=level:
-                    self._open_named_debug(k, t, f, lv),
-            )
-        try:
-            btn = self._debug_btn
-            menu.tk_popup(btn.winfo_rootx(),
-                          btn.winfo_rooty() + btn.winfo_height())
-        finally:
-            menu.grab_release()
+        self._debug_consoles.build_menu(self._debug_btn)
 
     def _update_debug_btn(self):
         if not hasattr(self, "_debug_btn"):
             return
-        any_open = any(w.winfo_exists()
-                       for w in self._debug_consoles.values())
+        any_open = self._debug_consoles.has_any_open()
         self._debug_btn.config(fg="#58a6ff" if any_open else "#6e7681")
 
     def _open_display_settings(self):
@@ -879,71 +725,49 @@ class App(tk.Tk):
     # ------------------------------------------------------------------
 
     def _save_tasks(self):
-        try:
-            data = {
-                "version":   self._TASKS_VERSION,
-                "station":   getattr(self, "_station", ""),
-                "project":   getattr(self, "_project", None),
-                "tests":     self._test_names,
-                "preset":    getattr(self, "_preset", ""),
-                "display_w": getattr(self, "_display_w", 0),
-                "display_h": getattr(self, "_display_h", 0),
-            }
-            with open(self._TASKS_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            log.warning("Gagal simpan tasks.json: %s", e)
+        self._task_store.save({
+            "station":   getattr(self, "_station", ""),
+            "project":   getattr(self, "_project", None),
+            "tests":     self._test_names,
+            "preset":    getattr(self, "_preset", ""),
+            "display_w": getattr(self, "_display_w", 0),
+            "display_h": getattr(self, "_display_h", 0),
+        })
 
     def _load_tasks(self):
-        if not os.path.isfile(self._TASKS_FILE):
+        data = self._task_store.load()
+        if not data:
             return
-        try:
-            with open(self._TASKS_FILE, encoding="utf-8") as f:
-                data = json.load(f)
 
-            if isinstance(data, list):
-                names = data
-            else:
-                ver = data.get("version", 1)
-                if ver > self._TASKS_VERSION:
-                    log.warning(
-                        "tasks.json version %d lebih baru dari yang didukung (%d), skip.",
-                        ver, self._TASKS_VERSION,
-                    )
-                    return
+        names         = data.get("tests", [])
+        self._station = data.get("station", "")
+        self._project = data.get("project", None)
 
-                names         = data.get("tests", [])
-                self._station = data.get("station", "")
-                self._project = data.get("project", None)
+        saved_preset = data.get("preset", "")
+        if saved_preset and (saved_preset in DISPLAY_PRESETS
+                             or saved_preset == "Custom"):
+            self._preset    = saved_preset
+            self._scale     = FONT_SCALE.get(saved_preset, 1.0)
+            self._display_w = data.get("display_w", self._display_w)
+            self._display_h = data.get("display_h", self._display_h)
 
-                saved_preset = data.get("preset", "")
-                if saved_preset and (saved_preset in DISPLAY_PRESETS
-                                     or saved_preset == "Custom"):
-                    self._preset    = saved_preset
-                    self._scale     = FONT_SCALE.get(saved_preset, 1.0)
-                    self._display_w = data.get("display_w", self._display_w)
-                    self._display_h = data.get("display_h", self._display_h)
+        for name in names:
+            # Migrasi: format lama "flash:boot" tidak valid lagi (harus "flash:proj:region")
+            if name.startswith("flash:") and name.count(":") < 2:
+                log.warning("Skip test format lama %r — pilih ulang Flash project via Add Test", name)
+                continue
+            try:
+                item = load_test(name)
+                self._tests.append(item)
+                self._test_names.append(name)
+            except Exception as e:
+                log.warning("Gagal load test %r: %s", name, e)
 
-            for name in names:
-                # Migrasi: format lama "flash:boot" tidak valid lagi (harus "flash:proj:region")
-                if name.startswith("flash:") and name.count(":") < 2:
-                    log.warning("Skip test format lama %r — pilih ulang Flash project via Add Test", name)
-                    continue
-                try:
-                    item = load_test(name)
-                    self._tests.append(item)
-                    self._test_names.append(name)
-                except Exception as e:
-                    log.warning("Gagal load test %r: %s", name, e)
+        if not self._project:
+            self._project = detect_project(self._test_names)
 
-            if not self._project:
-                self._project = detect_project(self._test_names)
-
-            if self._project == "tm81":
-                self._keepalive.start()
-
-        except Exception as e:
-            log.warning("Gagal load tasks.json: %s", e)
+        if self._project == "tm81":
+            self._keepalive.start()
 
 
 if __name__ == "__main__":

@@ -68,4 +68,28 @@
 
 ---
 
-*Terakhir diupdate: 2026-07-23*
+## Validasi Field Real-Time (Run Button)
+
+- **Tombol Run otomatis disabled** — untuk test TM81 yang butuh data dari field UI atau Commissioning Settings (Set Device ID, Set DevEUI/JoinEUI/AppKey/NwKey/DevAddr, Set Join Mode, Set Device Class, Set LoRa Config, Set User Config), tombol Run di-disable secara real-time selama data terkait masih kosong — bukan menunggu diklik baru menampilkan NG
+- **Refresh otomatis** — status validasi ikut ter-refresh saat: field Device ID diketik/berubah, Commissioning Settings disimpan, test list di-load ulang, atau project berganti
+- **Pesan spesifik per field** — mis. "device_id kosong — isi field 'Device ID / Serial No.' di UI", bukan pesan generik
+- **Aman terhadap nilai nol** — field numerik yang valid bernilai 0 (mis. `tx_power`, `dev_class`) tidak salah dianggap "kosong"
+- **Tahan file Commissioning hilang** — jika `commissioning.json` belum pernah dibuat (instalasi baru), tombol yang bergantung padanya tetap ter-disable dengan pesan yang jelas, bukan error/crash saat diklik
+
+---
+
+## Commissioning Settings
+
+- **Timezone jadi dropdown WIB/WITA/WIT** — field Timezone di tab User Config sekarang combo box `WIB (GMT+7)` / `WITA (GMT+8)` / `WIT (GMT+9)`, menggantikan input angka bebas — operator tidak perlu tahu nilai GMT-nya
+- **Auto-refresh validasi setelah simpan** — begitu Commissioning Settings disimpan, tombol Run yang tadinya disabled langsung ikut ter-update tanpa perlu reload manual
+
+---
+
+## Tampilan Window & Dialog
+
+- **Window utama center di layar** — saat `main.py` dijalankan, window Test Point otomatis diposisikan di tengah layar (bukan pojok kiri-atas default OS)
+- **Dialog konfirmasi center di parent** — popup "Clear All" dan "Konflik Project" tampil di tengah window Test Point, bukan di posisi default OS
+
+---
+
+*Terakhir diupdate: 2026-07-24*

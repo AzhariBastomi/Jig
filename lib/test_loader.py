@@ -39,13 +39,15 @@ import json
 import logging
 import os
 import pkgutil
+import sys
 import threading
 import tests
 
 _log = logging.getLogger("test_loader")
 
 from test_base import TestBase
-from test_modules import ProgressBarTest, ManualTest, AutoTest
+from test_modules import ProgressBarTest, ManualTest, AutoTest, build_test_item
+from validation_rules import build_rule, validation_message
 
 # ---------------------------------------------------------------------------
 # Shared context — diisi oleh app sebelum test dijalankan.
@@ -105,6 +107,81 @@ _TM81_JSON          = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_te
 _TM81_OTA_JSON      = os.path.join(_ROOT, "commands", "tm81", "config", "tm81_ota.json")
 _COMMISSIONING_JSON = os.path.join(_ROOT, "commands", "tm81", "config", "commissioning.json")
 _BEXA_JSON          = os.path.join(_ROOT, "commands", "bexa",  "config", "bexa_test.json")
+
+
+# ---------------------------------------------------------------------------
+# JsonTestSource — Template Method Pattern.
+#
+# TM81 dan BEXA sama-sama disimpan sebagai {"label": ..., "tests": [{"name":,
+# "command_class":, "type": ...}]} dan sama-sama butuh: baca JSON, filter entry
+# yang disabled, resolve command_class secara dinamis, derive label & daftar
+# module_names. Dulu ini ditulis dua kali (nyaris identik) sebagai fungsi lepas
+# per project (_make_tm81_item/_make_bexa_item, tm81_label/bexa_label, dst).
+#
+# Sekarang logic yang sama (baca-JSON, filter, label, module_names, resolve
+# command class) hidup sekali di sini. Subclass (TM81TestSource, BexaTestSource)
+# cukup override make_item(entry) untuk bagian yang memang beda — menambah
+# project JSON baru yang berbentuk sama = 1 class baru, bukan 1 set fungsi baru.
+# ---------------------------------------------------------------------------
+
+class JsonTestSource:
+    json_path:      str = ""       # path file JSON — override di subclass
+    prefix:         str = ""       # dipakai di module_names(), mis. "tm81:<name>"
+    entity_label:   str = "Test"   # dipakai di pesan error, mis. "TM81 test"
+
+    def read_json(self) -> dict:
+        try:
+            with open(self.json_path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def is_enabled(self, entry: dict) -> bool:
+        """Entry aktif jika 'name' ada (bukan '_name') dan 'disabled' != true."""
+        return "name" in entry and not entry.get("disabled", False)
+
+    def label(self) -> str:
+        cfg = self.read_json()
+        if cfg.get("label"):
+            return cfg["label"]
+        stem = os.path.splitext(os.path.basename(self.json_path))[0]
+        return stem.replace("_", " ").title()
+
+    def module_names(self) -> list[str]:
+        cfg = self.read_json()
+        return [f"{self.prefix}:{e['name']}" for e in cfg.get("tests", []) if self.is_enabled(e)]
+
+    def load_all(self) -> list:
+        cfg = self.read_json()
+        return [self.make_item(e) for e in cfg.get("tests", []) if self.is_enabled(e)]
+
+    def load_one(self, entry_name: str):
+        cfg = self.read_json()
+        json_file = os.path.basename(self.json_path)
+        for e in cfg.get("tests", []):
+            if e.get("name") == entry_name:
+                if not self.is_enabled(e):
+                    raise KeyError(f"{self.entity_label} '{entry_name}' di-disabled di {json_file}")
+                return self.make_item(e)
+        raise KeyError(f"{self.entity_label} '{entry_name}' tidak ditemukan di {json_file}")
+
+    @staticmethod
+    def resolve_command_class(class_path: str):
+        """Import command_class secara dinamis. Return (cls, error_message)."""
+        if not class_path:
+            return None, ""
+        try:
+            if _ROOT not in sys.path:
+                sys.path.insert(0, _ROOT)
+            mod_path, cls_name = class_path.rsplit(".", 1)
+            mod = importlib.import_module(mod_path)
+            return getattr(mod, cls_name), ""
+        except Exception as e:
+            return None, str(e)
+
+    def make_item(self, entry: dict):
+        """Override di subclass: bangun satu TestItem dari satu entry JSON."""
+        raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -233,15 +310,6 @@ def voltage_module_names() -> list[str]:
 # TM81 helpers
 # ---------------------------------------------------------------------------
 
-def _read_tm81_json() -> dict:
-    """Baca tm81_test.json. Return {} jika tidak ada."""
-    try:
-        with open(_TM81_JSON) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
 def _read_commissioning_json() -> dict:
     """
     Baca commissioning.json (ditulis oleh CommissioningDialog).
@@ -278,89 +346,85 @@ def _merge_commissioning(base: dict) -> dict:
     return merged
 
 
-def _make_tm81_item(entry: dict, commissioning: dict = None):
-    """Buat AutoTest untuk satu entry di tm81_test.json.
-
-    commissioning — dict dari section 'commissioning' di tm81_test.json.
-    Params priority: commissioning[name] < entry['params'] < context['@key'].
+class TM81TestSource(JsonTestSource):
+    """Test dari tm81_test.json. Tiap entry butuh 'commissioning' (di-merge dari
+    tm81_test.json + commissioning.json) untuk resolve params — dihitung sekali
+    per load_all()/load_one(), disimpan di self._commissioning selama proses
+    berlangsung, lalu dipakai make_item() untuk tiap entry.
     """
-    import importlib as _imp
-    import sys as _sys
 
-    name        = entry.get("name", "unknown")
-    label       = entry.get("label", name)
-    desc        = entry.get("description", "")
-    cmd_class   = entry.get("command_class", "")
-    ttype       = entry.get("type", "auto").lower()
+    json_path    = _TM81_JSON
+    prefix       = "tm81"
+    entity_label = "TM81 test"
 
-    # Params di-resolve saat runtime:
-    # 1. commissioning[name]  — nilai per-batch dari dalam test JSON itu sendiri
-    # 2. entry["params"]      — override statis (opsional, jarang perlu)
-    # 3. "@key" → context[key] — nilai per-device dari UI
-    _commissioning = commissioning or {}
-    static_params  = entry.get("params", {})
+    def __init__(self):
+        self._commissioning = {}
 
-    def _resolve_params() -> dict:
-        # Base: commissioning[name], skip field "_doc"
-        params = {k: v for k, v in _commissioning.get(name, {}).items()
-                  if not k.startswith("_")}
-        # Override dengan static_params dari entry
-        params.update(static_params)
-        # Resolve "@key" → context[key]
-        for k, v in list(params.items()):
-            if isinstance(v, str) and v.startswith("@"):
-                params[k] = get_context(v[1:])
-        return params
+    def load_all(self) -> list:
+        cfg = self.read_json()
+        self._commissioning = _merge_commissioning(cfg.get("commissioning", {}))
+        return super().load_all()
 
-    # Resolve class sekarang (load time), bukan saat test run
-    _cmd_cls   = None
-    _load_err  = ""
-    if cmd_class:
-        try:
-            if _ROOT not in _sys.path:
-                _sys.path.insert(0, _ROOT)
-            _mod_path, _cls_name = cmd_class.rsplit(".", 1)
-            _mod      = _imp.import_module(_mod_path)
-            _cmd_cls  = getattr(_mod, _cls_name)
-        except Exception as _e:
-            _load_err = str(_e)
+    def load_one(self, entry_name: str):
+        cfg = self.read_json()
+        self._commissioning = _merge_commissioning(cfg.get("commissioning", {}))
+        return super().load_one(entry_name)
 
-    _ch340 = logging.getLogger("serial_comm.ch340")
+    def make_item(self, entry: dict):
+        """Buat TestItem untuk satu entry di tm81_test.json.
+        Params priority: commissioning[name] < entry['params'] < context['@key'].
+        """
+        name        = entry.get("name", "unknown")
+        label       = entry.get("label", name)
+        desc        = entry.get("description", "")
+        cmd_class   = entry.get("command_class", "")
+        ttype       = entry.get("type", "auto").lower()
 
-    def _run_fn():
-        if _cmd_cls is None:
-            return f"NG:{_load_err or 'command_class tidak diset'}"
-        try:
-            params = _resolve_params()
-            _log.info("[TEST] %s", label)
-            result = _cmd_cls(params=params).execute()
-            # Log parsed result ke CH340 debug window
-            r = str(result).strip()
-            if r.upper().startswith("OK:"):
-                first_line = r[3:].split("\n")[0].strip()
-                _ch340.debug("[TM81 PARSED] OK  %s", first_line)
-            elif not (r.upper() == "OK"):
-                _ch340.debug("[TM81 PARSED] %s", r.split("\n")[0])
-            return result
-        except Exception as e:
-            _log.exception("[TEST] %s exception:", label)
-            _ch340.debug("[TM81 PARSED] EXCEPTION: %s", e)
-            return f"NG:{e}"
+        commissioning = self._commissioning
+        static_params = entry.get("params", {})
 
-    # Buat validate_fn dari "validate" key di entry
-    _validate_spec = entry.get("validate")  # e.g. {"dev_eui": 16, "dev_addr": "nonzero_hex"}
+        def _resolve_params() -> dict:
+            # Base: commissioning[name], skip field "_doc"
+            params = {k: v for k, v in commissioning.get(name, {}).items()
+                      if not k.startswith("_")}
+            # Override dengan static_params dari entry
+            params.update(static_params)
+            # Resolve "@key" → context[key]
+            for k, v in list(params.items()):
+                if isinstance(v, str) and v.startswith("@"):
+                    params[k] = get_context(v[1:])
+            return params
 
-    def _validate_fn(spec=_validate_spec, _name=name, _sp=static_params):
-        if not spec:
-            return None
-        import json as _json
-        try:
-            with open(_COMMISSIONING_JSON, encoding="utf-8") as _f:
-                _cfg = _json.load(_f)
-        except Exception:
-            _cfg = {}
-        _sec = _cfg.get(_name, {})
-        for _param, _rule in spec.items():
+        # Resolve class sekarang (load time), bukan saat test run
+        _cmd_cls, _load_err = self.resolve_command_class(cmd_class)
+        _ch340 = logging.getLogger("serial_comm.ch340")
+
+        def _run_fn():
+            if _cmd_cls is None:
+                return f"NG:{_load_err or 'command_class tidak diset'}"
+            try:
+                params = _resolve_params()
+                _log.info("[TEST] %s", label)
+                result = _cmd_cls(params=params).execute()
+                # Log parsed result ke CH340 debug window
+                r = str(result).strip()
+                if r.upper().startswith("OK:"):
+                    first_line = r[3:].split("\n")[0].strip()
+                    _ch340.debug("[TM81 PARSED] OK  %s", first_line)
+                elif not (r.upper() == "OK"):
+                    _ch340.debug("[TM81 PARSED] %s", r.split("\n")[0])
+                return result
+            except Exception as e:
+                _log.exception("[TEST] %s exception:", label)
+                _ch340.debug("[TM81 PARSED] EXCEPTION: %s", e)
+                return f"NG:{e}"
+
+        # Buat validate_fn dari "validate" key di entry
+        _validate_spec = entry.get("validate")  # e.g. {"dev_eui": 16, "dev_addr": "nonzero_hex"}
+
+        def _resolve_validated_value(_param, _sp, _sec):
+            """Ambil nilai field: static param dulu, lalu commissioning section,
+            resolve '@key' -> live context (mis. device_id dari field UI)."""
             _raw = _sp.get(_param)
             if _raw is None:
                 _raw = _sec.get(_param, "")
@@ -368,75 +432,53 @@ def _make_tm81_item(entry: dict, commissioning: dict = None):
                 _raw = get_context(_raw[1:])
             if _raw is None:
                 _raw = ""
-            _val = str(_raw).strip().replace(":", "").replace(" ", "")
-            if isinstance(_rule, int):
-                if len(_val) < _rule:
-                    if _param == "device_id":
-                        return "NG:device_id kosong — isi field 'Device ID / Serial No.' di UI"
-                    return f"NG:{_param} belum diisi (butuh {_rule} karakter). Buka Commissioning Settings."
-            elif _rule == "nonzero_hex":
-                _int = 0
-                try:
-                    _int = int(_val, 16) if _val else 0
-                except ValueError:
-                    pass
-                if _int == 0:
-                    return f"NG:{_param} tidak boleh 0. Buka Commissioning Settings."
-        return None
+            return str(_raw).strip().replace(":", "").replace(" ", "")
 
-    kw = dict(title=label, command=f"TM81_{name.upper()}",
-              description=desc, run_fn=_run_fn,
-              validate_fn=_validate_fn if _validate_spec else None,
-              no_retry=entry.get("no_retry", False))
+        def _validate_fn(spec=_validate_spec, _name=name, _sp=static_params):
+            if not spec:
+                return None
+            try:
+                with open(_COMMISSIONING_JSON, encoding="utf-8") as _f:
+                    _cfg = json.load(_f)
+            except Exception:
+                _cfg = {}
+            _sec = _cfg.get(_name, {})
+            for _param, _raw_rule in spec.items():
+                _val  = _resolve_validated_value(_param, _sp, _sec)
+                _rule = build_rule(_raw_rule)
+                if not _rule.check(_val):
+                    return f"NG:{validation_message(_param, _rule)}"
+            return None
 
-    if ttype == "manual":
-        return ManualTest(**kw)
-    else:
-        return AutoTest(**kw)
+        kw = dict(title=label, command=f"TM81_{name.upper()}",
+                  description=desc, run_fn=_run_fn,
+                  validate_fn=_validate_fn if _validate_spec else None,
+                  no_retry=entry.get("no_retry", False))
+
+        return build_test_item(ttype, **kw)
 
 
-def _tm81_enabled(entry: dict) -> bool:
-    """Entry diaktifkan jika: 'name' ada (bukan '_name') dan 'disabled' != true."""
-    return "name" in entry and not entry.get("disabled", False)
+_tm81_source = TM81TestSource()
 
 
 def load_tm81_tests() -> list:
     """Baca tm81_test.json dan kembalikan list TestItem — satu per entry."""
-    cfg           = _read_tm81_json()
-    commissioning = _merge_commissioning(cfg.get("commissioning", {}))
-    return [_make_tm81_item(e, commissioning)
-            for e in cfg.get("tests", []) if _tm81_enabled(e)]
+    return _tm81_source.load_all()
 
 
 def tm81_module_names() -> list:
     """Kembalikan ["tm81:ping", "tm81:get_version", ...] sesuai urutan di tm81_test.json."""
-    cfg = _read_tm81_json()
-    return [f"tm81:{e['name']}" for e in cfg.get("tests", []) if _tm81_enabled(e)]
+    return _tm81_source.module_names()
 
 
 def tm81_label() -> str:
-    """Derive label dari field 'label' di tm81_test.json, atau fallback ke nama file.
-    Contoh: file = tm81_test.json → "TM81 Test" (kecuali ada field label di JSON).
-    """
-    cfg = _read_tm81_json()
-    if cfg.get("label"):
-        return cfg["label"]
-    stem = os.path.splitext(os.path.basename(_TM81_JSON))[0]
-    return stem.replace("_", " ").title()
+    """Derive label dari field 'label' di tm81_test.json, atau fallback ke nama file."""
+    return _tm81_source.label()
 
 
 # ---------------------------------------------------------------------------
 # TM81 Flash helpers  (sama sistemnya dengan TM81, prefix "tm81_ota:")
 # ---------------------------------------------------------------------------
-
-def _read_tm81_ota_json() -> dict:
-    """Baca tm81_ota.json. Return {} jika tidak ada."""
-    try:
-        with open(_TM81_OTA_JSON) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
 
 class _TM81FlashStep(TestBase):
     """
@@ -481,188 +523,161 @@ class _TM81FlashStep(TestBase):
         return result
 
 
-def _make_tm81_ota_item(entry: dict, cfg: dict):
-    """
-    Buat satu TestItem untuk satu langkah TM81 Flash dari tm81_ota.json -> tests.
-    Sama polanya dengan _make_tm81_item, tapi inject fw_config dari top-level.
-    """
-    import importlib as _imp, sys as _sys
+class TM81OtaTestSource(JsonTestSource):
+    """Test dari tm81_ota.json (satu langkah OTA per entry). Beda dengan TM81
+    biasa: tiap entry butuh fw_path/chunk_size/dll yang di-resolve dari
+    commissioning.json + flash.json + tm81_ota.json sendiri (fw_version) —
+    disimpan sekali per load_all()/load_one() di self._cfg."""
 
-    name       = entry.get("name", "unknown")
-    label      = entry.get("label", name)
-    desc       = entry.get("description", "")
-    ttype      = entry.get("type", "auto").lower()
-    class_path = entry.get("command_class", "")
-    post_wait  = float(entry.get("post_wait_s", 0.0))
+    json_path    = _TM81_OTA_JSON
+    prefix       = "tm81_ota"
+    entity_label = "TM81 Flash step"
 
-    # Fixed OTA params dari commissioning.json["ota"]
-    comm_ota   = _read_commissioning_json().get("ota", {})
-    conn       = comm_ota.get("connection",    "ch340")
-    chunk_size = comm_ota.get("chunk_size",    512)
-    fill_ff    = comm_ota.get("fill_with_ff",  False)
+    def __init__(self):
+        self._cfg = {}
 
-    # fw_dir dari flash.json["flash_dir"] (sama folder firmware)
-    flash_cfg  = _read_flash_json()
-    fw_dir     = os.path.join(_ROOT, flash_cfg.get("flash_dir", "firmware"))
+    def is_enabled(self, entry: dict) -> bool:
+        return "name" in entry   # tidak ada konsep 'disabled' untuk step OTA
 
-    # fw_version dari tm81_ota.json (user-configurable)
-    # Bisa berupa full absolute path (dari OTA Settings dialog) atau nama file relatif ke fw_dir
-    fw_version = cfg.get("fw_version", "")
-    if not fw_version:
-        fw_path = ""
-    elif os.path.isabs(fw_version):
-        fw_path = fw_version
-    else:
-        fw_path = os.path.join(fw_dir, fw_version)
+    def load_all(self) -> list:
+        self._cfg = self.read_json()
+        return super().load_all()
 
-    # Untuk step Write Firmware: tambahkan info file ke description
-    if "BLWriteFirmware" in class_path or name == "write_fw":
-        if not fw_path:
-            desc += "\n⚠ Belum ada firmware — buka OTA Settings untuk pilih file"
-        elif not os.path.isfile(fw_path):
-            desc += f"\n⚠ File tidak ditemukan: {os.path.basename(fw_path)}"
+    def load_one(self, entry_name: str):
+        self._cfg = self.read_json()
+        return super().load_one(entry_name)
+
+    def make_item(self, entry: dict):
+        name       = entry.get("name", "unknown")
+        label      = entry.get("label", name)
+        desc       = entry.get("description", "")
+        ttype      = entry.get("type", "auto").lower()
+        class_path = entry.get("command_class", "")
+        post_wait  = float(entry.get("post_wait_s", 0.0))
+
+        # Fixed OTA params dari commissioning.json["ota"]
+        comm_ota   = _read_commissioning_json().get("ota", {})
+        conn       = comm_ota.get("connection",    "ch340")
+        chunk_size = comm_ota.get("chunk_size",    512)
+        fill_ff    = comm_ota.get("fill_with_ff",  False)
+
+        # fw_dir dari flash.json["flash_dir"] (sama folder firmware)
+        flash_cfg  = _read_flash_json()
+        fw_dir     = os.path.join(_ROOT, flash_cfg.get("flash_dir", "firmware"))
+
+        # fw_version dari tm81_ota.json (user-configurable)
+        # Bisa berupa full absolute path (dari OTA Settings dialog) atau nama file relatif ke fw_dir
+        fw_version = self._cfg.get("fw_version", "")
+        if not fw_version:
+            fw_path = ""
+        elif os.path.isabs(fw_version):
+            fw_path = fw_version
         else:
-            size_kb = os.path.getsize(fw_path) / 1024
-            desc += f"\nFile: {os.path.basename(fw_path)} ({size_kb:.1f} KB)"
+            fw_path = os.path.join(fw_dir, fw_version)
 
-    # Params: fw config (base) + entry["params"] (override, misal skip_set_rdy)
-    params = {"fw_path": fw_path, "chunk_size": chunk_size, "fill_with_ff": fill_ff}
-    params.update(entry.get("params", {}))
+        # Untuk step Write Firmware: tambahkan info file ke description
+        if "BLWriteFirmware" in class_path or name == "write_fw":
+            if not fw_path:
+                desc += "\n⚠ Belum ada firmware — buka OTA Settings untuk pilih file"
+            elif not os.path.isfile(fw_path):
+                desc += f"\n⚠ File tidak ditemukan: {os.path.basename(fw_path)}"
+            else:
+                size_kb = os.path.getsize(fw_path) / 1024
+                desc += f"\nFile: {os.path.basename(fw_path)} ({size_kb:.1f} KB)"
 
-    # Load command class (sama dengan _make_tm81_item)
-    _cmd_cls  = None
-    _load_err = ""
-    if class_path:
-        try:
-            if _ROOT not in _sys.path:
-                _sys.path.insert(0, _ROOT)
-            mod_path, cls_name = class_path.rsplit(".", 1)
-            mod      = _imp.import_module(mod_path)
-            _cmd_cls = getattr(mod, cls_name)
-        except Exception as e:
-            _load_err = str(e)
+        # Params: fw config (base) + entry["params"] (override, misal skip_set_rdy)
+        params = {"fw_path": fw_path, "chunk_size": chunk_size, "fill_with_ff": fill_ff}
+        params.update(entry.get("params", {}))
 
-    if _cmd_cls is None:
-        def _err_fn(): return f"NG:{_load_err or 'command_class tidak diset'}"
-        return AutoTest(title=label, command=f"TM81_FLASH_{name.upper()}",
-                        description=desc, run_fn=_err_fn)
+        _cmd_cls, _load_err = self.resolve_command_class(class_path)
 
-    # Bungkus dalam _TM81FlashStep agar progress_cb bisa di-inject
-    instance = _TM81FlashStep(_cmd_cls, conn, params, post_wait)
-    kw = dict(title=label, command=f"TM81_FLASH_{name.upper()}",
-              description=desc, run_fn=instance.run)
+        if _cmd_cls is None:
+            def _err_fn(): return f"NG:{_load_err or 'command_class tidak diset'}"
+            return AutoTest(title=label, command=f"TM81_FLASH_{name.upper()}",
+                            description=desc, run_fn=_err_fn)
 
-    if ttype == "progress":
-        return ProgressBarTest(**kw,
-                               steps=entry.get("steps", 50),
-                               step_ms=entry.get("step_ms", 200))
-    else:
-        return AutoTest(**kw)
+        # Bungkus dalam _TM81FlashStep agar progress_cb bisa di-inject
+        instance = _TM81FlashStep(_cmd_cls, conn, params, post_wait)
+        kw = dict(title=label, command=f"TM81_FLASH_{name.upper()}",
+                  description=desc, run_fn=instance.run)
+
+        if ttype == "progress":
+            kw.update(steps=entry.get("steps", 50), step_ms=entry.get("step_ms", 200))
+        return build_test_item(ttype, **kw)
+
+
+_tm81_ota_source = TM81OtaTestSource()
 
 
 def load_tm81_ota_tests() -> list:
     """Baca tm81_ota.json dan kembalikan list TestItem — satu per langkah."""
-    cfg = _read_tm81_ota_json()
-    return [_make_tm81_ota_item(e, cfg) for e in cfg.get("tests", [])]
+    return _tm81_ota_source.load_all()
 
 
 def tm81_ota_module_names() -> list[str]:
     """Kembalikan ["tm81_ota:app_goto_bl", "tm81_ota:bl_prepare", ...] sesuai urutan."""
-    cfg = _read_tm81_ota_json()
-    return [f"tm81_ota:{e['name']}" for e in cfg.get("tests", []) if "name" in e]
+    return _tm81_ota_source.module_names()
 
 
 def tm81_ota_label() -> str:
-    """Derive label tampilan dari field 'label' di tm81_ota.json, atau fallback ke nama file.
-    Contoh: file = tm81_ota.json, field label = "TM81 OTA" → return "TM81 OTA".
-    """
-    cfg = _read_tm81_ota_json()
-    if cfg.get("label"):
-        return cfg["label"]
-    # Fallback: derive dari nama file → "tm81_ota" → "TM81 OTA"
-    stem = os.path.splitext(os.path.basename(_TM81_OTA_JSON))[0]
-    return stem.replace("_", " ").title()
+    """Derive label tampilan dari field 'label' di tm81_ota.json, atau fallback ke nama file."""
+    return _tm81_ota_source.label()
 
 
 # ---------------------------------------------------------------------------
 # BEXA helpers
 # ---------------------------------------------------------------------------
 
-def _read_bexa_json() -> dict:
-    """Baca bexa_test.json. Return {} jika tidak ada."""
-    try:
-        with open(_BEXA_JSON, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+class BexaTestSource(JsonTestSource):
+    """Test dari bexa_test.json — bentuknya paling sederhana: tidak ada
+    commissioning/context tambahan, murni command_class + run_fn."""
+
+    json_path    = _BEXA_JSON
+    prefix       = "bexa"
+    entity_label = "BEXA test"
+
+    def make_item(self, entry: dict):
+        name     = entry.get("name", "unknown")
+        label    = entry.get("label", name)
+        desc     = entry.get("description", "")
+        cls_path = entry.get("command_class", "")
+        ttype    = entry.get("type", "auto").lower()
+
+        _cmd_cls, _load_err = self.resolve_command_class(cls_path)
+
+        def _run_fn():
+            if _cmd_cls is None:
+                return f"NG:{_load_err or 'command_class tidak diset'}"
+            try:
+                _log.info("[BEXA] %s", label)
+                return _cmd_cls().execute()
+            except Exception as e:
+                _log.exception("[BEXA] %s exception:", label)
+                return f"NG:{e}"
+
+        kw = dict(title=label, command=f"BEXA_{name.upper()}",
+                  description=desc, run_fn=_run_fn,
+                  no_retry=entry.get("no_retry", False))
+
+        return build_test_item(ttype, **kw)
 
 
-def _bexa_enabled(entry: dict) -> bool:
-    return "name" in entry and not entry.get("disabled", False)
-
-
-def _make_bexa_item(entry: dict):
-    """Buat AutoTest atau ManualTest untuk satu entry di bexa_test.json."""
-    import importlib as _imp
-    import sys as _sys
-
-    name      = entry.get("name", "unknown")
-    label     = entry.get("label", name)
-    desc      = entry.get("description", "")
-    cls_path  = entry.get("command_class", "")
-    ttype     = entry.get("type", "auto").lower()
-
-    _cmd_cls  = None
-    _load_err = ""
-    if cls_path:
-        try:
-            if _ROOT not in _sys.path:
-                _sys.path.insert(0, _ROOT)
-            mod_path, cls_name = cls_path.rsplit(".", 1)
-            mod      = _imp.import_module(mod_path)
-            _cmd_cls = getattr(mod, cls_name)
-        except Exception as e:
-            _load_err = str(e)
-
-    def _run_fn():
-        if _cmd_cls is None:
-            return f"NG:{_load_err or 'command_class tidak diset'}"
-        try:
-            _log.info("[BEXA] %s", label)
-            return _cmd_cls().execute()
-        except Exception as e:
-            _log.exception("[BEXA] %s exception:", label)
-            return f"NG:{e}"
-
-    kw = dict(title=label, command=f"BEXA_{name.upper()}",
-              description=desc, run_fn=_run_fn,
-              no_retry=entry.get("no_retry", False))
-
-    if ttype == "manual":
-        return ManualTest(**kw)
-    else:
-        return AutoTest(**kw)
+_bexa_source = BexaTestSource()
 
 
 def load_bexa_tests() -> list:
     """Baca bexa_test.json dan kembalikan list TestItem."""
-    cfg = _read_bexa_json()
-    return [_make_bexa_item(e) for e in cfg.get("tests", []) if _bexa_enabled(e)]
+    return _bexa_source.load_all()
 
 
 def bexa_module_names() -> list[str]:
     """Kembalikan ['bexa:config_request', 'bexa:get_bt_info', ...] sesuai urutan."""
-    cfg = _read_bexa_json()
-    return [f"bexa:{e['name']}" for e in cfg.get("tests", []) if _bexa_enabled(e)]
+    return _bexa_source.module_names()
 
 
 def bexa_label() -> str:
     """Derive label dari field 'label' di bexa_test.json."""
-    cfg = _read_bexa_json()
-    if cfg.get("label"):
-        return cfg["label"]
-    stem = os.path.splitext(os.path.basename(_BEXA_JSON))[0]
-    return stem.replace("_", " ").title()
+    return _bexa_source.label()
 
 
 # ---------------------------------------------------------------------------
@@ -696,11 +711,8 @@ def _make_item(cls_or_mod):
     kw = dict(title=title, command=cmd, description=desc, run_fn=run_fn)
 
     if ttype == "progress":
-        return ProgressBarTest(steps=steps, step_ms=step_ms, **kw)
-    elif ttype == "manual":
-        return ManualTest(**kw)
-    else:
-        return AutoTest(**kw)
+        kw.update(steps=steps, step_ms=step_ms)
+    return build_test_item(ttype, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -736,15 +748,7 @@ def load_test(module_name: str):
         "flash:boot"   ->  FlashTest untuk region "boot" di flash.json
     """
     if module_name.startswith("tm81:"):
-        entry_name    = module_name[len("tm81:"):]
-        cfg           = _read_tm81_json()
-        commissioning = _merge_commissioning(cfg.get("commissioning", {}))
-        for e in cfg.get("tests", []):
-            if e.get("name") == entry_name:
-                if not _tm81_enabled(e):
-                    raise KeyError(f"TM81 test '{entry_name}' di-disabled di tm81_test.json")
-                return _make_tm81_item(e, commissioning)
-        raise KeyError(f"TM81 test '{entry_name}' tidak ditemukan di tm81_test.json")
+        return _tm81_source.load_one(module_name[len("tm81:"):])
 
     if module_name.startswith("voltage:"):
         entry_name = module_name[len("voltage:"):]
@@ -767,22 +771,10 @@ def load_test(module_name: str):
         raise KeyError(f"Flash region '{region_name}' tidak ditemukan di project '{proj_name}'")
 
     if module_name.startswith("tm81_ota:"):
-        entry_name = module_name[len("tm81_ota:"):]
-        cfg = _read_tm81_ota_json()
-        for e in cfg.get("tests", []):
-            if e.get("name") == entry_name:
-                return _make_tm81_ota_item(e, cfg)
-        raise KeyError(f"TM81 Flash step '{entry_name}' tidak ditemukan di tm81_ota.json")
+        return _tm81_ota_source.load_one(module_name[len("tm81_ota:"):])
 
     if module_name.startswith("bexa:"):
-        entry_name = module_name[len("bexa:"):]
-        cfg = _read_bexa_json()
-        for e in cfg.get("tests", []):
-            if e.get("name") == entry_name:
-                if not _bexa_enabled(e):
-                    raise KeyError(f"BEXA test '{entry_name}' di-disabled di bexa_test.json")
-                return _make_bexa_item(e)
-        raise KeyError(f"BEXA test '{entry_name}' tidak ditemukan di bexa_test.json")
+        return _bexa_source.load_one(module_name[len("bexa:"):])
 
     # Modul biasa dari folder tests/
     mod = importlib.import_module(f"tests.{module_name}")

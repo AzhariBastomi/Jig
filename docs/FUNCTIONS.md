@@ -53,12 +53,15 @@
 
 ### Debug Console
 
+Logic sebenarnya ada di `DebugConsoleManager` (lihat bagian `ui/debug_console_manager.py`
+di bawah) — `App` cuma jadi jembatan tipis ke tombol UI, tidak lagi menyimpan
+dict window atau logic buka/tutup sendiri.
+
 | Function | Deskripsi |
 |---|---|
-| `_maybe_open_debug_console()` | Buka debug window otomatis saat startup jika `config.json debug.enabled = 1`; layout grid 2 kolom |
-| `_toggle_debug_console()` | Klik tombol 🐛 Debug — tampilkan menu pilihan window per serial port + extras |
-| `_open_named_debug(key, title, ...)` | Buka (atau fokus) satu DebugConsole window beridentitas `key` |
-| `_update_debug_btn()` | Update warna tombol Debug (biru = ada window terbuka, abu = semua tutup) |
+| `_maybe_open_debug_console()` | Delegasi ke `DebugConsoleManager.maybe_autostart()` |
+| `_toggle_debug_console()` | Delegasi ke `DebugConsoleManager.build_menu(self._debug_btn)` |
+| `_update_debug_btn()` | Update warna tombol Debug berdasar `DebugConsoleManager.has_any_open()` |
 
 ### Dialog
 
@@ -79,10 +82,13 @@
 
 ### Persistensi
 
+Baca/tulis file `tasks.json` sendiri sudah dipindah ke class `TaskStore`
+(`lib/task_store.py`, lihat di bawah) — `App` cuma menyusun/membaca dict-nya.
+
 | Function | Deskripsi |
 |---|---|
-| `_save_tasks()` | Simpan state (test list, project, preset, station) ke `tasks.json` |
-| `_load_tasks()` | Load state dari `tasks.json` saat startup; skip format lama dengan warning |
+| `_save_tasks()` | Susun dict state (test list, project, preset, station) lalu `TaskStore.save(dict)` |
+| `_load_tasks()` | `TaskStore.load()` lalu terjemahkan hasilnya jadi state App (test list, project, preset, keepalive) |
 
 ---
 
@@ -136,23 +142,154 @@
 
 ---
 
-## lib/test_loader.py (fungsi utama)
+## lib/test_loader.py
+
+### `JsonTestSource` — base class (Template Method Pattern)
+
+TM81, TM81 OTA, dan BEXA sama-sama disimpan sebagai
+`{"label": ..., "tests": [{"name":, "command_class":, "type": ...}]}` dan butuh
+logic yang sama: baca JSON, filter entry `disabled`, resolve `command_class`
+secara dinamis, derive label & daftar module_names. Logic itu hidup sekali di
+`JsonTestSource`; subclass cukup override `make_item(entry)`.
+
+| Method | Deskripsi |
+|---|---|
+| `read_json()` | Baca file di `self.json_path`, return `{}` kalau gagal |
+| `is_enabled(entry)` | True kalau `"name"` ada dan `disabled` != true (override di `TM81OtaTestSource`: tidak ada konsep disabled) |
+| `label()` | Label dari `cfg["label"]`, fallback ke nama file |
+| `module_names()` | List `"<prefix>:<name>"` untuk entry yang enabled |
+| `load_all()` | List `TestItem` untuk semua entry yang enabled |
+| `load_one(entry_name)` | Satu `TestItem`; raise `KeyError` kalau tidak ada / disabled |
+| `resolve_command_class(class_path)` *(static)* | Import class dinamis dari string `"pkg.mod.Class"` — return `(cls, error_message)` |
+| `make_item(entry)` | **Override wajib di subclass** — bangun satu `TestItem` dari satu entry |
+
+**Subclass:**
+
+| Class | Beda dengan base |
+|---|---|
+| `TM81TestSource` | Tiap entry butuh `commissioning` (merge `tm81_test.json` + `commissioning.json`) untuk resolve params `"@key"`; dihitung sekali per `load_all()`/`load_one()`, dipakai semua entry lewat `self._commissioning` |
+| `TM81OtaTestSource` | Tiap entry butuh `fw_path`/`chunk_size`/dll dari `commissioning.json["ota"]` + `flash.json` + `tm81_ota.json["fw_version"]` sendiri; disimpan di `self._cfg`. `is_enabled()` di-override (tidak ada field `disabled`) |
+| `BexaTestSource` | Paling sederhana — tidak ada context/commissioning tambahan |
+
+Instance module-level: `_tm81_source`, `_tm81_ota_source`, `_bexa_source` — dipakai
+oleh fungsi publik di bawah (semua tetap dengan nama & signature yang sama seperti
+sebelumnya, jadi tidak ada caller yang perlu berubah):
+
+| Function | Delegasi ke |
+|---|---|
+| `load_tm81_tests()` / `tm81_module_names()` / `tm81_label()` | `_tm81_source` |
+| `load_tm81_ota_tests()` / `tm81_ota_module_names()` / `tm81_ota_label()` | `_tm81_ota_source` |
+| `load_bexa_tests()` / `bexa_module_names()` / `bexa_label()` | `_bexa_source` |
+
+### Fungsi lain
 
 | Function | Deskripsi |
 |---|---|
-| `load_test(module_name)` | Load satu TestItem dari module name; mendukung format `flash:proj:region`, `tm81:`, `tm81_ota:`, `voltage:`, dll. |
+| `load_test(module_name)` | Load satu TestItem dari module name; mendukung format `flash:proj:region`, `tm81:`, `tm81_ota:`, `bexa:`, `voltage:`, dll. |
 | `discover_tests()` | Scan folder `tests/` untuk modul custom |
 | `update_context(ctx)` | Update context global (device_id, station) yang dibaca test saat runtime |
 | `flash_project_names()` | Daftar nama project dari `flash.json["projects"]` |
 | `flash_project_label(proj_name)` | Label tampilan project flash (dari field `label` di JSON) |
 | `flash_module_names(proj_name)` | List module name untuk semua region project (`flash:tm81:boot`, dll.) |
 | `load_flash_tests_named(proj_name)` | Load semua TestItem + module_name untuk region yang aktif (skip opsional + file kosong) |
-| `tm81_label()` | Label dari `tm81_test.json["label"]`, fallback ke nama file |
-| `tm81_ota_label()` | Label dari `tm81_ota.json["label"]`, fallback ke nama file |
-| `tm81_module_names()` | List module name TM81 test |
-| `tm81_ota_module_names()` | List module name TM81 OTA step |
 | `voltage_module_names()` | List module name voltage test |
 | `_region_active(r)` | Return False jika region `optional=True` AND `file` kosong |
+
+---
+
+## lib/test_modules.py
+
+### `TestItem` hierarchy (Polymorphism)
+
+`TestItem` (base) → `ProgressBarTest` / `ManualTest` / `AutoTest`. Tiap subclass
+mendeklarasikan atribut dirinya sendiri — kode luar (widget/controller/loader)
+tidak perlu tanya "kamu tipe apa", tinggal baca atribut ini:
+
+| Atribut/Method | Deskripsi |
+|---|---|
+| `type_key` | String kunci registrasi (`"auto"` / `"manual"` / `"progress"`) — dipakai `build_test_item()` dan `ui.row_behavior.get_behavior()` |
+| `is_manual` | `True` hanya di `ManualTest` — dipakai controller (`_seq_worker`) tanpa perlu cek `TestType` |
+| `reset()` | Kembalikan result ke PENDING, kosongkan last_error |
+| `is_done()` | True kalau result OK/NG |
+
+### Factory Pattern
+
+| Function | Deskripsi |
+|---|---|
+| `TEST_TYPE_REGISTRY` | Dict `type_key -> class`, dibangun otomatis dari `cls.type_key` tiap subclass |
+| `build_test_item(type_key, **kwargs)` | Instansiasi subclass yang tepat; fallback ke `AutoTest` kalau `type_key` tak dikenal |
+
+---
+
+## lib/validation_rules.py (Strategy Pattern)
+
+Rule validasi dari `"validate"` di `tm81_test.json` (mis. `{"device_id": 1}`,
+`{"dev_addr": "nonzero_hex"}`) diterjemahkan jadi objek `ValidationRule` — loop
+validasi di `test_loader.py` cukup panggil `rule.check(value)`, tidak perlu tahu
+jenis rule-nya.
+
+| Class/Function | Deskripsi |
+|---|---|
+| `ValidationRule.check(value)` | Interface — True kalau valid |
+| `ValidationRule.default_message(param)` | Interface — pesan NG default |
+| `MinLengthRule(n)` | Rule lama: nilai int di JSON → panjang string minimal `n` |
+| `NonzeroHexRule()` | Rule lama: string `"nonzero_hex"` → nilai hex tidak boleh 0 |
+| `build_rule(raw)` | Factory — ubah rule mentah dari JSON jadi objek `ValidationRule` |
+| `CUSTOM_MESSAGES` | Dict override pesan per-parameter (mis. `"device_id"` → pesan yang lebih ramah) |
+| `validation_message(param, rule)` | Pesan NG final — custom kalau ada di `CUSTOM_MESSAGES`, default kalau tidak |
+
+---
+
+## ui/row_behavior.py (Strategy + Polymorphism + Factory)
+
+Perilaku UI per `TestType` (bangun tombol, respons running/selesai/reset) yang
+dulu jadi if/elif panjang di `TestRowWidget`, sekarang jadi class terpisah.
+
+| Class | Deskripsi |
+|---|---|
+| `RowBehavior` (base) | Default — dipakai `AutoTest`: satu tombol Run, tanpa progress bar |
+| `ProgressBehavior` | Tombol Run + progress bar (dipakai flashing, sensor calibration) |
+| `ManualBehavior` | Tombol OK/NG, tidak ada Run (`supports_validation = False`) |
+| `get_behavior(type_key)` | Factory — pilih instance behavior yang cocok dari `BEHAVIOR_REGISTRY` |
+
+Method yang di-override tiap subclass: `build_control(row)`, `build_progress_area(row, ...)`,
+`set_running(row)`, `set_result(row, ...)`, `reset(row)`.
+
+---
+
+## ui/test_row_widget.py — class `TestRowWidget`
+
+| Function | Deskripsi |
+|---|---|
+| `show_retry(attempt, total)` | Update status text jadi "Retry n/total..." — dipanggil controller, tidak lagi akses `_status_lbl` langsung |
+| `refresh_validation()` | Cek `validate_fn` tanpa menjalankan test — enable/disable tombol Run real-time (dipanggil saat field device_id berubah / Commissioning Settings disimpan) |
+| `ResultState` / `RESULT_STATES` | State Pattern ringan — badge (teks+warna) per `TestResult`, satu sumber data dipakai `_build()` dan `_update_badge()` |
+
+---
+
+## ui/debug_console_manager.py — class `DebugConsoleManager`
+
+Dulu jadi dict `self._debug_consoles` + 4 method di `App` (God Object). Sekarang
+berdiri sendiri — `App` cuma compose satu instance dan delegasi.
+
+| Method | Deskripsi |
+|---|---|
+| `open_or_focus(key, title, ...)` | Buka (atau fokus) satu window DebugConsole beridentitas `key` |
+| `maybe_autostart()` | Buka window otomatis saat startup jika `config.json debug.enabled = 1`; layout grid 2 kolom |
+| `build_menu(anchor_btn)` | Bangun & tampilkan menu popup pilihan window, anchor ke tombol 🐛 Debug |
+| `has_any_open()` | True kalau ada window yang masih terbuka — dipakai `App._update_debug_btn()` |
+
+---
+
+## lib/task_store.py — class `TaskStore`
+
+Baca/tulis `tasks.json` — murni file I/O, tidak tahu apa-apa soal Tkinter atau
+`TestItem`. Dulu jadi bagian `App._save_tasks()`/`_load_tasks()` (God Object).
+
+| Method | Deskripsi |
+|---|---|
+| `load()` | Return dict data tasks.json (`{}` kalau tidak ada/rusak/versi lebih baru dari yang didukung); format lama (list) dinormalisasi jadi `{"tests": [...]}` |
+| `save(data)` | Simpan dict ke `tasks.json`, key `"version"` otomatis ditambahkan |
 
 ---
 
@@ -167,8 +304,13 @@
 
 ## controllers/
 
+`TestController.run_test()` dan `_seq_worker()` tidak lagi cek `TestType` lewat
+if/elif — dispatch fallback (item tanpa `run_fn`, mis. test bawaan demo) lewat
+`_runner_registry` (dict `type_key -> method`), dan cek manual lewat `item.is_manual`.
+
 | Class / Function | Deskripsi |
 |---|---|
+| `TestController._runner_registry` | Dict `{"progress": _run_progress, "manual": _run_manual, "auto": _run_auto}` — Factory/Strategy registry |
 | `TestController.run_all(rows, done_callback, scroll_fn)` | Jalankan semua test secara sekuensial di background thread |
 | `TestController.stop_now(rows)` | Hentikan test yang sedang berjalan, set status SKIP untuk yang belum |
 | `TestController.is_seq_running()` | Return True jika test sedang berjalan |
@@ -177,4 +319,21 @@
 
 ---
 
-*Terakhir diupdate: 2026-07-23*
+## Ringkasan Pola OOP yang Diterapkan
+
+Detail lengkap tiap pattern (di mana, kenapa, dan contoh kode) ada di
+`docs/ARSITEKTUR.md`. Ringkasan lokasinya:
+
+| Pattern | Lokasi |
+|---|---|
+| **Factory** | `test_modules.build_test_item()` + `TEST_TYPE_REGISTRY`; `row_behavior.get_behavior()` + `BEHAVIOR_REGISTRY`; `validation_rules.build_rule()`; `TestController._runner_registry` |
+| **Strategy** | `TestItem.run_fn` / `validate_fn` (callable disuntik ke objek); `validation_rules.ValidationRule` hierarchy (`MinLengthRule`, `NonzeroHexRule`) |
+| **Polymorphism** | `TestItem` → `ProgressBarTest`/`ManualTest`/`AutoTest` (`type_key`, `is_manual`); `RowBehavior` → `ProgressBehavior`/`ManualBehavior` |
+| **State** (ringan) | `ResultState`/`RESULT_STATES` di `ui/test_row_widget.py` |
+| **Template Method** | `JsonTestSource` (base) → `TM81TestSource`/`TM81OtaTestSource`/`BexaTestSource` di `lib/test_loader.py` |
+| **Encapsulation fix** | `TestRowWidget.show_retry()` — controller tidak lagi akses widget privat langsung |
+| **Single Responsibility** | `TaskStore` (I/O tasks.json) dan `DebugConsoleManager` (window debug) diekstrak dari `App` (god object) di `main.py` |
+
+---
+
+*Terakhir diupdate: 2026-07-24*

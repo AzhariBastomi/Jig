@@ -5,7 +5,7 @@ File ini menjadi satu-satunya program TM81. Di AddTestDialog akan muncul DUA gru
   1. TM81 (N test)     — dibaca dari commands/tm81/config/tm81_test.json  → prefix "tm81:"
   2. TM81 Flash (4 step) — dibaca dari commands/tm81/config/tm81_ota.json → prefix "tm81_ota:"
 
-Factory _make_tm81_item() dan _make_tm81_ota_item() masing-masing membuat
+TM81TestSource dan TM81OtaTestSource (lib/test_loader.py) masing-masing membuat
 TestItem per entry, dengan run_fn yang memanggil command class dari commands/tm81/.
 
 Format di tasks.json:

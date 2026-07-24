@@ -7,29 +7,32 @@ Run standalone for a visual demo:
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "lib"))
+_UI_DIR = os.path.dirname(os.path.abspath(__file__))
+if _UI_DIR not in sys.path:
+    sys.path.insert(0, _UI_DIR)
 
 import tkinter as tk
-from test_modules import TestType, TestResult
+from dataclasses import dataclass
+from test_modules import TestResult
 from config import COLORS, BASE_FONTS
+from row_behavior import get_behavior
 
-BADGE_TEXT = {
-    TestResult.PENDING: "---",
-    TestResult.RUNNING: "...",
-    TestResult.OK:      " OK ",
-    TestResult.NG:      " NG ",
-}
-BADGE_BG = {
-    TestResult.PENDING: COLORS["pending"],
-    TestResult.RUNNING: COLORS["running"],
-    TestResult.OK:      COLORS["ok"],
-    TestResult.NG:      COLORS["ng"],
-}
 BADGE_FG = "white"
 
-TYPE_COLOR = {
-    TestType.PROGRESS: "#3498db",
-    TestType.MANUAL:   "#8e44ad",
-    TestType.AUTO:     "#27ae60",
+
+@dataclass(frozen=True)
+class ResultState:
+    """State Pattern (ringan): setiap TestResult tahu cara tampil sendiri
+    sebagai badge, tanpa if/elif di widget."""
+    badge_text: str
+    badge_bg_key: str   # key ke dict COLORS, biar tetap ikut tema warna
+
+
+RESULT_STATES = {
+    TestResult.PENDING: ResultState("---",  "pending"),
+    TestResult.RUNNING: ResultState("...",  "running"),
+    TestResult.OK:      ResultState(" OK ", "ok"),
+    TestResult.NG:      ResultState(" NG ", "ng"),
 }
 
 
@@ -59,6 +62,9 @@ class TestRowWidget:
         self.on_run_request = on_run_request
         self._detail_text   = ""
         self._pct           = 0
+        # Strategy object — TestRowWidget tidak perlu tahu jenis test_item konkretnya,
+        # cukup tanya behavior yang cocok (dipilih lewat Factory get_behavior()).
+        self._behavior      = get_behavior(test_item.type_key)
         self._build()
 
     def _fs(self, k):
@@ -88,7 +94,7 @@ class TestRowWidget:
         r1 = tk.Frame(content, bg=bg)
         r1.pack(fill="x")
 
-        tc = TYPE_COLOR.get(self.test_item.test_type, COLORS["running"])
+        tc = self._behavior.badge_color
         self._num_badge = tk.Label(
             r1, text=f"{self.index+1:02d}",
             bg=tc, fg="white",
@@ -147,20 +153,7 @@ class TestRowWidget:
         r3.pack(fill="x", pady=(pad_top, 0))
         r3.pack_propagate(False)
 
-        if self.test_item.test_type == TestType.PROGRESS:
-            tk.Frame(r3, bg=bg, width=indent).pack(side="left")
-            self._bar_cv = tk.Canvas(
-                r3, height=bar_h, bg=bg,
-                highlightthickness=0, bd=0)
-            self._bar_cv.pack(side="left", fill="x", expand=True,
-                              padx=(0, int(6*s)))
-            self._bar_cv.bind("<Configure>", self._draw_bar)
-            self._pct_lbl = tk.Label(
-                r3, text="0%",
-                bg=bg, fg=COLORS["sub"],
-                font=("TkDefaultFont", self._fs("small"), "bold"),
-                width=4)
-            self._pct_lbl.pack(side="right")
+        self._behavior.build_progress_area(self, r3, indent, bar_h)
 
         # ── Right: result badge only, vertically centered ─────────────
         actions = tk.Frame(inner, bg=bg)
@@ -169,10 +162,11 @@ class TestRowWidget:
         mid = tk.Frame(actions, bg=bg)
         mid.pack(expand=True, anchor="center")
 
-        self._badge_var = tk.StringVar(value=BADGE_TEXT[self.test_item.result])
+        state = RESULT_STATES[self.test_item.result]
+        self._badge_var = tk.StringVar(value=state.badge_text)
         self._badge = tk.Label(
             mid, textvariable=self._badge_var,
-            bg=BADGE_BG[self.test_item.result],
+            bg=COLORS[state.badge_bg_key],
             fg=BADGE_FG,
             font=("TkDefaultFont", self._fs("small"), "bold"),
             width=5, anchor="center",
@@ -180,21 +174,7 @@ class TestRowWidget:
         self._badge.pack()
 
     def _build_control(self):
-        t = self.test_item.test_type
-        s = self.scale
-        if t == TestType.PROGRESS:
-            self._run_btn = self._mk_btn("Run", "#3498db", self._request_run)
-            self._run_btn.pack(side="left")
-        elif t == TestType.MANUAL:
-            self._ok_btn = self._mk_btn("OK", COLORS["ok"],
-                lambda: self._manual_result(TestResult.OK))
-            self._ok_btn.pack(side="left", padx=(0, int(3*s)))
-            self._ng_btn = self._mk_btn("NG", COLORS["ng"],
-                lambda: self._manual_result(TestResult.NG))
-            self._ng_btn.pack(side="left")
-        elif t == TestType.AUTO:
-            self._run_btn = self._mk_btn("Run", "#27ae60", self._request_run)
-            self._run_btn.pack(side="left")
+        self._behavior.build_control(self)
 
     def _mk_btn(self, text, color, cmd):
         s = self.scale
@@ -227,20 +207,18 @@ class TestRowWidget:
         self.test_item.result = TestResult.RUNNING
         self._update_badge()
         self._status_lbl.config(text="Running…", fg=COLORS["running"])
-        t = self.test_item.test_type
-        if t in (TestType.PROGRESS, TestType.AUTO):
-            self._run_btn.config(state="disabled")
-        if t == TestType.PROGRESS:
-            self._pct = 0
-            self._draw_bar()
-            self._pct_lbl.config(text="0%", fg=COLORS["sub"])
+        self._behavior.set_running(self)
+
+    def show_retry(self, attempt: int, total: int):
+        """Update status text jadi 'Retry n/total...' — dipakai controller saat
+        auto-retry, tanpa perlu tahu/akses widget label secara langsung."""
+        self._status_lbl.config(text=f"Retry {attempt}/{total}...", fg=COLORS["running"])
 
     def set_result(self, result, error: str = "", ok_msg: str = ""):
         self.test_item.result = result
         if error:
             self.test_item.last_error = error
         self._update_badge()
-        t = self.test_item.test_type
 
         BRIEF_MAX = max(20, int(int(220 * self.scale) // 7))
 
@@ -258,36 +236,8 @@ class TestRowWidget:
         err_full              = error or self.test_item.last_error or "NG"
         err_brief, err_detail = _make_brief(err_full)
 
-        if t == TestType.PROGRESS:
-            if result == TestResult.OK:
-                self._pct = 100
-            self._draw_bar()
-            self._pct_lbl.config(
-                text=f"{self._pct}%",
-                fg=COLORS["ok"] if result == TestResult.OK else COLORS["ng"])
-            self._run_btn.config(state="normal")
-            if result == TestResult.NG:
-                self._status_lbl.config(text=err_brief, fg=COLORS["ng"])
-                self._bind_detail(err_detail or err_full, leave_color=COLORS["ng"])
-            else:
-                self._status_lbl.config(
-                    text=ok_brief,
-                    fg=COLORS["ok"] if ok_brief else COLORS["sub"])
-                self._bind_detail(ok_detail)
-
-        elif t == TestType.MANUAL:
-            pass
-
-        elif t == TestType.AUTO:
-            self._run_btn.config(state="normal")
-            if result == TestResult.OK:
-                self._status_lbl.config(
-                    text=ok_brief,
-                    fg=COLORS["ok"] if ok_brief else COLORS["sub"])
-                self._bind_detail(ok_detail)
-            else:
-                self._status_lbl.config(text=err_brief, fg=COLORS["ng"])
-                self._bind_detail(err_detail or err_full, leave_color=COLORS["ng"])
+        self._behavior.set_result(
+            self, result, ok_brief, ok_detail, err_brief, err_detail, err_full)
 
     def advance_progress(self, percent: int):
         if not hasattr(self, "_bar_cv"):
@@ -297,7 +247,7 @@ class TestRowWidget:
         self._pct_lbl.config(text=f"{percent}%", fg=_pcolor(percent))
 
     def enable_manual_buttons(self):
-        if self.test_item.test_type == TestType.MANUAL:
+        if self.test_item.is_manual:
             self._status_lbl.config(text="Periksa & konfirmasi", fg=COLORS["warn"])
 
     def reset(self):
@@ -305,13 +255,7 @@ class TestRowWidget:
         self._update_badge()
         self._status_lbl.config(text="", fg=COLORS["sub"])
         self._unbind_detail()
-        t = self.test_item.test_type
-        if t in (TestType.PROGRESS, TestType.AUTO):
-            self._run_btn.config(state="normal")
-        if t == TestType.PROGRESS:
-            self._pct = 0
-            self._draw_bar()
-            self._pct_lbl.config(text="0%", fg=COLORS["sub"])
+        self._behavior.reset(self)
         self.refresh_validation()
 
     def destroy(self):
@@ -414,9 +358,9 @@ class TestRowWidget:
     # ---------------------------------------------------------------- internals
 
     def _update_badge(self):
-        r = self.test_item.result
-        self._badge_var.set(BADGE_TEXT[r])
-        self._badge.config(bg=BADGE_BG[r], fg=BADGE_FG)
+        state = RESULT_STATES[self.test_item.result]
+        self._badge_var.set(state.badge_text)
+        self._badge.config(bg=COLORS[state.badge_bg_key], fg=BADGE_FG)
 
     def _request_run(self):
         fn = getattr(self.test_item, "validate_fn", None)
@@ -431,8 +375,7 @@ class TestRowWidget:
     def refresh_validation(self):
         """Cek validate_fn tanpa menjalankan test — dipakai untuk enable/disable
         tombol Run secara real-time (mis. saat field Device ID diketik)."""
-        t = self.test_item.test_type
-        if t not in (TestType.PROGRESS, TestType.AUTO):
+        if not self._behavior.supports_validation:
             return
         if self.test_item.result != TestResult.PENDING:
             return  # jangan ganggu tampilan saat running / sudah selesai
