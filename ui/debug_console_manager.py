@@ -94,38 +94,84 @@ class DebugConsoleManager:
         return win
 
     def maybe_autostart(self):
-        """Buka window debug otomatis saat startup jika config debug.enabled = 1."""
+        """Buka window debug otomatis saat startup jika config debug.enabled = 1.
+
+        Semua window ditata grid _COLS-kolom, dan keseluruhan grid itu di-center
+        ke layar (bukan cuma nempel di pojok window utama) — dihitung dari total
+        window yang akan dibuka, supaya 1 window pun tetap center, dan banyak
+        window tetap rapi tanpa saling menutupi.
+        """
         cfg = self.load_config()
         if not cfg.get("enabled", 0):
             return
         level        = cfg.get("level", "DEBUG")
         serial_conns = self._read_serial_connections()
 
-        grid_col, grid_row = 0, 0
-
-        def _next_pos():
-            nonlocal grid_col, grid_row
-            pos = (40 + grid_col * _WIN_W, 40 + grid_row * _WIN_H)
-            grid_col += 1
-            if grid_col >= _COLS:
-                grid_col = 0
-                grid_row += 1
-            return pos
-
-        # 1. Satu window per serial connection (auto dari config.json)
+        # Kumpulkan dulu semua window yang akan dibuka, supaya ukuran grid
+        # (dan karenanya titik center-nya) bisa dihitung sebelum ada yang dibuka.
+        to_open = []
         for conn_name, conn_def in serial_conns.items():
             desc  = conn_def.get("description", conn_name)
             key   = f"serial.{conn_name}"
             title = f"Debug — {conn_name.upper()}  ({desc})"
-            self.open_or_focus(key, title, name_filter=f"serial_comm.{conn_name}",
-                                level=level, offset=_next_pos())
+            to_open.append((key, title, f"serial_comm.{conn_name}"))
 
-        # 2. Window tambahan dari debug.windows (misal "all", "commands")
         for wid in cfg.get("windows", []):
             if wid in _EXTRA_WINDOWS:
                 title, nf = _EXTRA_WINDOWS[wid]
-                self.open_or_focus(wid, title, name_filter=nf, level=level,
-                                    offset=_next_pos())
+                to_open.append((wid, title, nf))
+
+        if not to_open:
+            return
+
+        start_x, start_y = self._centered_grid_start(len(to_open))
+        root_x, root_y   = self._root.winfo_rootx(), self._root.winfo_rooty()
+
+        for i, (key, title, nf) in enumerate(to_open):
+            col, row = i % _COLS, i // _COLS
+            abs_x = start_x + col * _WIN_W
+            abs_y = start_y + row * _WIN_H
+            # open_or_focus menambahkan posisi root ke offset — konversi balik
+            # supaya hasil akhirnya tetap koordinat layar absolut yang sudah di-center.
+            offset = (abs_x - root_x, abs_y - root_y)
+            self.open_or_focus(key, title, name_filter=nf, level=level, offset=offset)
+
+        # Window debug baru dibuat di atas Test Point — angkat lagi window utama
+        # ke depan supaya operator tidak perlu geser-geser window debug dulu
+        # untuk mengakses Test Point. Ditunda sedikit (after) supaya dijalankan
+        # SETELAH semua window debug selesai di-render oleh window manager —
+        # kalau langsung, window debug yang belum sempat digambar bisa balik
+        # menutupi lagi.
+        self._root.after(150, self._refocus_root)
+
+    def _refocus_root(self):
+        """Angkat & fokuskan window utama (Test Point) ke depan.
+
+        lift()/focus_force() saja kadang tidak cukup di Windows karena OS
+        mencegah aplikasi background mencuri foreground focus — trik toggle
+        'topmost' sebentar memaksa window manager benar-benar mengangkatnya.
+        """
+        try:
+            self._root.deiconify()
+            self._root.lift()
+            self._root.attributes("-topmost", True)
+            self._root.after(50, lambda: self._root.attributes("-topmost", False))
+            self._root.focus_force()
+        except Exception:
+            pass
+
+    def _centered_grid_start(self, count: int) -> tuple:
+        """Titik kiri-atas (screen-absolute) supaya grid berisi `count` window
+        (_COLS kolom) ter-center di layar."""
+        cols = min(_COLS, count)
+        rows = -(-count // _COLS)  # ceil division
+        grid_w = cols * _WIN_W
+        grid_h = rows * _WIN_H
+        sw = self._root.winfo_screenwidth()
+        sh = self._root.winfo_screenheight()
+        x = max(0, (sw - grid_w) // 2)
+        y = max(0, (sh - grid_h) // 2)
+        return x, y
 
     def build_menu(self, anchor_btn):
         """Bangun & tampilkan menu popup pilihan window debug, anchor ke tombol."""

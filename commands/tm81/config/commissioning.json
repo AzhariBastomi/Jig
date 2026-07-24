@@ -9,7 +9,7 @@
     "join_mode": 2
   },
   "lora_set_dev_class": {
-    "_doc": "0=A,1=B,2=C",
+    "_doc": "0=ClassA,1=ClassB,2=ClassC",
     "dev_class": 0
   },
   "lora_set_dev_eui": {
@@ -29,7 +29,7 @@
     "nw_key": "8833E75406D203F48D1F6D2CCC2815D8"
   },
   "lora_set_dev_addr": {
-    "_doc": "integer 4-byte, ABP",
+    "_doc": "hex string 4-byte, ABP",
     "dev_addr": "0x0100000B"
   },
   "lora_set_config": {
@@ -43,8 +43,8 @@
     "activation": 1,
     "initial_counter": 0,
     "counter_res": 1,
-    "alarm": 64,
-    "submit_id": 0,
+    "alarm": 0,
+    "submit_id": 2,
     "timezone": 7,
     "msg_type": 1
   }
